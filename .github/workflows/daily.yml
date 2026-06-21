@@ -44,6 +44,7 @@ jobs:
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
         run: python run_daily.py
 
       - name: Build encrypted static site

@@ -306,7 +306,11 @@ async function unlock(){
 }
 document.getElementById('go').onclick=unlock;
 document.getElementById('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock();});
-const saved=localStorage.getItem('mb_pw'); if(saved){document.getElementById('pw').value=saved;unlock();}
+// 링크에 #pw=... 가 있으면 자동 잠금해제(텔레그램에서 탭 한 번에 열림). 주소창에선 즉시 제거.
+let hpw=null;
+if(location.hash.indexOf('pw=')>=0){ try{hpw=decodeURIComponent(location.hash.split('pw=')[1].split('&')[0]);}catch(e){} }
+const saved=hpw||localStorage.getItem('mb_pw');
+if(saved){ document.getElementById('pw').value=saved; if(hpw) history.replaceState(null,'',location.pathname); unlock(); }
 </script>
 </body>
 </html>"""

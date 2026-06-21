@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from collect import collect, save_raw
@@ -94,12 +96,19 @@ def main() -> None:
     if args.no_deliver:
         print("(--no-deliver) 전송 생략")
         return
+
+    # 텔레그램 메시지에 넣을 대시보드 링크 — 비번을 #pw= 로 담아 탭 한 번에 열리게
+    url = cfg.get("dashboard_url")
+    pw = os.environ.get("SITE_PASSWORD")
+    dash = f"{url}#pw={quote(pw)}" if (url and pw) else url
+
     if briefing:
-        asyncio.run(deliver(briefing, header=f"📰 데일리 마켓 브리핑 — {today}"))
+        body = briefing + (f"\n\n🔗 대시보드(탭하면 열림): {dash}" if dash else "")
+        asyncio.run(deliver(body, header=f"📰 데일리 마켓 브리핑 — {today}"))
     else:
         # 크레딧 미충전 등으로 브리핑이 없으면, 수집 피드 다이제스트라도 보낸다
         print("브리핑 없음 — 수집 피드 다이제스트 전송")
-        digest = build_digest(items, today, cfg.get("dashboard_url"))
+        digest = build_digest(items, today, dash)
         asyncio.run(deliver(digest))
 
 
