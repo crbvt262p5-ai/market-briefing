@@ -210,6 +210,7 @@ HTML = r"""<!doctype html>
     </div>
     <div class="spacer"></div>
     <select id="dateSel"></select>
+    <button class="tab" id="logout" title="이 기기에서 비밀번호 기억 지우기">로그아웃</button>
   </header>
   <div class="wrap">
     <div id="brief" class="md"></div>
@@ -291,7 +292,7 @@ function setView(v){ VIEW=v;
 async function unlock(){
   const pw=document.getElementById('pw').value;
   try{ DATA=await decrypt(pw); }catch(e){ document.getElementById('err').textContent='비밀번호가 틀렸습니다'; return; }
-  sessionStorage.setItem('mb_pw',pw);
+  localStorage.setItem('mb_pw',pw);   // 이 기기에 기억(브라우저 닫아도 유지)
   document.getElementById('gate').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   const sel=document.getElementById('dateSel');
@@ -300,11 +301,12 @@ async function unlock(){
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setView(t.dataset.view));
   document.getElementById('chSel').onchange=renderFeed;
   document.getElementById('q').oninput=renderFeed;
+  document.getElementById('logout').onclick=()=>{localStorage.removeItem('mb_pw');location.reload();};
   setView('brief');
 }
 document.getElementById('go').onclick=unlock;
 document.getElementById('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock();});
-const saved=sessionStorage.getItem('mb_pw'); if(saved){document.getElementById('pw').value=saved;unlock();}
+const saved=localStorage.getItem('mb_pw'); if(saved){document.getElementById('pw').value=saved;unlock();}
 </script>
 </body>
 </html>"""
