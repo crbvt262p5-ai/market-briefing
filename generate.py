@@ -7,7 +7,7 @@ import anthropic
 
 from config import ROOT
 
-MODEL = "claude-opus-4-8"
+MODEL = "claude-sonnet-4-6"  # 비용 절감(입력 $3/출력 $15). 품질↑ 원하면 claude-opus-4-8
 # Opus 4.8/4.7/4.6 + Sonnet 4.6 에서 동적 필터링을 지원하는 최신 웹검색 도구.
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search"}
 
