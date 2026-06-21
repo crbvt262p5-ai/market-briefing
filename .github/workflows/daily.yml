@@ -1,0 +1,72 @@
+name: daily-briefing
+
+on:
+  schedule:
+    # 매주 일~목 22:00 UTC = 월~금 07:00 KST (장 시작 전)
+    - cron: "0 22 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      skip_pipeline:
+        description: "수집·생성·전송을 건너뛰고 사이트만 다시 빌드"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # 암호화된 docs/ 를 저장소에 커밋(이력 누적)
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-briefing
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline (collect → generate → deliver)
+        if: ${{ inputs.skip_pipeline != true }}
+        continue-on-error: true   # 크레딧 부족 등으로 실패해도 대시보드는 기존분으로 갱신
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run_daily.py
+
+      - name: Build encrypted static site
+        env:
+          SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+        run: python build_site.py
+
+      - name: Commit updated site (history accumulation)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html docs/.nojekyll
+          git diff --cached --quiet || git commit -m "site: $(date -u +%Y-%m-%d) [skip ci]"
+          git push || true
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

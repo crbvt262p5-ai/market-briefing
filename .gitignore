@@ -1,0 +1,19 @@
+# 비밀값·세션·원문은 절대 커밋하지 않음
+.env
+*.session
+*.session-journal
+run_login.command
+
+# 브리핑 원문/수집 데이터는 평문이라 공개 저장소에 올리지 않음
+# (대시보드는 docs/ 의 '암호화된' 결과물만 사용)
+briefings/
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# docs/ 는 추적 (암호화된 정적 사이트) — 무시하지 않음
+
+# 비밀번호 임시 보관
+.site_password.txt

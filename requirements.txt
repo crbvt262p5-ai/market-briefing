@@ -1,0 +1,9 @@
+# Claude API SDK — web_search_20260209 / output_config.effort / adaptive thinking 사용
+anthropic>=0.69.0
+# 텔레그램 사용자 세션 수집/전송
+telethon>=1.36.0
+# 설정/환경
+pyyaml>=6.0
+python-dotenv>=1.0.0
+# 대시보드 암호화(build_site.py)
+cryptography>=42.0

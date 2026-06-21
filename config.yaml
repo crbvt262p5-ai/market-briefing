@@ -1,0 +1,45 @@
+# 수집 대상 채널: @username, t.me 링크, 또는 채널 ID 를 나열하세요.
+# 비공개 채널은 본인 계정이 구독(가입)되어 있어야 읽을 수 있습니다.
+channels:
+  # 시황 / 전략 / 매크로
+  - "@globalmktinsight"   # 미래에셋 시황 김석환
+  - "@hedgecat0301"       # 키움 전략/시황 한지영
+  - "@Meritz_strategy"    # 메리츠 투자전략팀
+  - "@sypark_strategy"    # 신영 박소연
+  - "@daishinstrategy"    # 대신 전략 돌직구
+  - "@eqmirae"            # 미래에셋 전략/퀀트 유명간
+  - "@hanwhastrategy"     # 한화 투자전략팀
+  # 미국주식 / 해외
+  - "@kwusa"              # 키움 미국주식 톡톡
+  - "@hana_us_stock"      # 하나 미국주식 강재구
+  - "@globaletfi"         # 하나 Global ETF 박승진
+  # 반도체 / 테크
+  - "@KISemicon"          # 한투 테크팀
+  - "@kiwoom_semibat"     # 키움 반도체/이차전지
+  # 채권
+  - "@deandatbond"        # 하나 해외채권 허성우
+  # 종합 리포트 / 뉴스
+  - "@companyreport"      # 증권사 리포트
+  - "@hankyung_fin"       # 한국경제
+
+# 수집 범위 (시간). cron 을 매일 1회 돌린다면 24가 적당합니다.
+lookback_hours: 24
+
+# 타임존 (출력 timestamp 표기에 사용)
+timezone: "Asia/Seoul"
+
+# 브리핑 결과물(.md)과 원본(.json) 저장 폴더
+output_dir: "briefings"
+
+# 텔레그램 전달 대상. "me" = 본인 Saved Messages.
+# 특정 채널/봇으로 보내려면 @username 또는 채널 ID 로 교체하세요.
+deliver_to: "me"
+
+# 직전 브리핑의 TL;DR 을 다음 브리핑에 맥락으로 전달(패턴 분석 연속성)
+keep_previous_summary: true
+
+# 특별히 주목할 종목/섹터/이슈 (선택). 비워두면 무시됩니다.
+focus: ""
+
+# 채널당 최대 수집 메시지 수 (lookback 안에서도 안전장치)
+max_messages_per_channel: 200
