@@ -43,3 +43,6 @@ focus: ""
 
 # 채널당 최대 수집 메시지 수 (lookback 안에서도 안전장치)
 max_messages_per_channel: 200
+
+# 텔레그램 메시지 하단에 넣을 대시보드 주소
+dashboard_url: "https://crbvt262p5-ai.github.io/market-briefing/"

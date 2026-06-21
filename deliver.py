@@ -12,6 +12,30 @@ from config import load_config, telegram_credentials
 CHUNK_LIMIT = 3900
 
 
+def build_digest(items: list[dict], date: str, dashboard_url: str | None = None) -> str:
+    """AI 브리핑이 없을 때(크레딧 미충전) 보내는 '수집 피드 다이제스트'.
+
+    채널별로 묶어 헤드라인 + 텔레그램 링크를 나열. 탭하면 텔레그램 원문으로 이동."""
+    lines = [f"📰 마켓 피드 · {date}"]
+    if dashboard_url:
+        lines.append(f"🔗 대시보드: {dashboard_url}")
+    lines.append(f"수집 {len(items)}건 · (AI 요약/브리핑은 크레딧 충전 시 자동 추가)")
+    lines.append("━━━━━━━━━━")
+
+    by_ch: dict[str, list[dict]] = {}
+    for it in items:
+        by_ch.setdefault(it.get("channel", "기타"), []).append(it)
+
+    for ch, msgs in by_ch.items():
+        lines.append(f"\n▸ {ch.strip('[] ')}")
+        for it in msgs:
+            head = next((ln for ln in (it.get("text", "") or "").splitlines() if ln.strip()), "")
+            head = head[:90]
+            link = it.get("link")
+            lines.append(f"• {head}" + (f"\n  {link}" if link else ""))
+    return "\n".join(lines)
+
+
 def split_message(text: str, limit: int = CHUNK_LIMIT) -> list[str]:
     """줄/문단 경계를 우선해 limit 이하 조각으로 분할."""
     chunks: list[str] = []

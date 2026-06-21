@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 from collect import collect, save_raw
 from config import load_config, output_dir
-from deliver import deliver
+from deliver import build_digest, deliver
 from generate import generate_briefing, summarize_feed
 
 
@@ -97,7 +97,10 @@ def main() -> None:
     if briefing:
         asyncio.run(deliver(briefing, header=f"📰 데일리 마켓 브리핑 — {today}"))
     else:
-        print("브리핑 없음 — 텔레그램 전송 생략")
+        # 크레딧 미충전 등으로 브리핑이 없으면, 수집 피드 다이제스트라도 보낸다
+        print("브리핑 없음 — 수집 피드 다이제스트 전송")
+        digest = build_digest(items, today, cfg.get("dashboard_url"))
+        asyncio.run(deliver(digest))
 
 
 if __name__ == "__main__":
