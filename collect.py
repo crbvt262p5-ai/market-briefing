@@ -10,6 +10,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from config import load_config, output_dir, telegram_credentials
+from fetch import extract_urls, fetch_many
 
 
 async def _collect_channel(client: TelegramClient, channel, cutoff_utc, tz, limit):
@@ -39,6 +40,7 @@ async def _collect_channel(client: TelegramClient, channel, cutoff_utc, tz, limi
                 "text": text,
                 "link": link,
                 "media_caption": None,
+                "urls": extract_urls(text),
             }
         )
         count += 1
@@ -63,6 +65,19 @@ async def collect() -> list[dict]:
 
     all_items.sort(key=lambda x: x["timestamp"])
     print(f"수집 완료: 총 {len(all_items)}건")
+
+    # 링크된 기사/리포트 본문 추출 (헤드라인이 아니라 실제 내용)
+    all_urls = list({u for it in all_items for u in it["urls"]})
+    if all_urls:
+        print(f"본문 추출: 외부 링크 {len(all_urls)}개...")
+        arts = fetch_many(all_urls)
+        ok = sum(1 for a in arts.values() if a.get("text"))
+        print(f"  본문 확보 {ok}건 / PDF·기타 {len(arts) - ok}건")
+        for it in all_items:
+            it["articles"] = [arts[u] for u in it["urls"] if u in arts]
+    else:
+        for it in all_items:
+            it["articles"] = []
     return all_items
 
 

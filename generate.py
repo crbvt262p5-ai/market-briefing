@@ -85,3 +85,49 @@ def generate_briefing(
         raise RuntimeError("브리핑 본문이 비어 있습니다 (stop_reason="
                            f"{response.stop_reason}).")
     return text
+
+
+def summarize_feed(items: list[dict]) -> list[dict]:
+    """각 항목의 추출 본문을 2~3문장으로 요약해 item['summary'] 에 채운다.
+
+    본문이 있는 항목만 대상. 구조화 출력(JSON)으로 한 번에 요약. 실패 시 예외를 올리지
+    않고 원본 그대로 반환(피드는 추출 본문으로 계속 표시됨)."""
+    targets = [(i, it) for i, it in enumerate(items)
+               if any(a.get("text") for a in it.get("articles", []))]
+    if not targets:
+        return items
+    payload = []
+    for i, it in targets:
+        body = "\n".join(a.get("text", "") for a in it["articles"] if a.get("text"))[:3000]
+        payload.append({"i": i, "headline": (it.get("text", "") or "")[:120], "body": body})
+
+    client = anthropic.Anthropic()
+    schema = {
+        "type": "object",
+        "properties": {"summaries": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"i": {"type": "integer"}, "s": {"type": "string"}},
+            "required": ["i", "s"], "additionalProperties": False}}},
+        "required": ["summaries"], "additionalProperties": False,
+    }
+    try:
+        resp = client.messages.create(
+            model=MODEL,
+            max_tokens=8000,
+            output_config={"format": {"type": "json_schema", "schema": schema}},
+            system=(
+                "너는 금융 뉴스/리포트 요약가다. 각 기사를 한국어로 2~3문장, 쉬운 말로 핵심만 "
+                "요약하라. 숫자·고유명사는 살리되 군더더기는 빼라. 투자 추천은 하지 마라."
+            ),
+            messages=[{"role": "user", "content":
+                       '아래 기사들을 각각 요약해 JSON 으로만 답하라.\n\n'
+                       + json.dumps(payload, ensure_ascii=False)}],
+        )
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        for s in json.loads(text).get("summaries", []):
+            idx = s.get("i")
+            if isinstance(idx, int) and 0 <= idx < len(items):
+                items[idx]["summary"] = s.get("s")
+    except Exception as e:  # noqa: BLE001
+        print(f"  (피드 요약 건너뜀: {str(e)[:100]})")
+    return items

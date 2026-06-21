@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 from collect import collect, save_raw
 from config import load_config, output_dir
 from deliver import deliver
-from generate import generate_briefing
+from generate import generate_briefing, summarize_feed
 
 
 def _today_str(cfg: dict) -> str:
@@ -59,7 +59,7 @@ def main() -> None:
     cfg = load_config()
     today = _today_str(cfg)
 
-    # 1) 수집
+    # 1) 수집 (+ 기사 본문 추출). raw 를 먼저 저장 → 이후 단계가 실패해도 '전체 피드'는 살아있음.
     if args.raw:
         items = json.loads(Path(args.raw).read_text(encoding="utf-8"))
         print(f"기존 raw 사용: {args.raw} ({len(items)}건)")
@@ -71,25 +71,33 @@ def main() -> None:
         print("수집된 메시지가 없습니다. 채널 설정/세션을 확인하세요. 종료.")
         return
 
-    # 2) 직전 브리핑 맥락
+    # 2) 피드 항목별 AI 요약 (best-effort — 크레딧 없으면 건너뜀, 피드는 추출본문 유지)
+    print("피드 요약 중...")
+    items = summarize_feed(items)
+    save_raw(items, today)  # 요약 반영해 재저장
+
+    # 3) 핵심 브리핑 생성 (best-effort)
     prev = None
     if cfg["keep_previous_summary"] and not args.no_search_ctx:
         prev = latest_previous_summary(today)
         if prev:
-            print("직전 브리핑 TL;DR 을 맥락으로 전달")
+            print("직전 브리핑 핵심을 맥락으로 전달")
+    briefing = None
+    try:
+        print("핵심 브리핑 생성 중...")
+        briefing = generate_briefing(items, prev_summary=prev, focus=cfg.get("focus") or None)
+        print("브리핑 저장:", save_briefing(briefing, today))
+    except Exception as e:  # noqa: BLE001
+        print(f"브리핑 생성 실패(피드·대시보드는 계속): {str(e)[:160]}")
 
-    # 3) 생성
-    print("Claude 브리핑 생성 중...")
-    briefing = generate_briefing(items, prev_summary=prev, focus=cfg.get("focus") or None)
-    path = save_briefing(briefing, today)
-    print("브리핑 저장:", path)
-
-    # 4) 전달
+    # 4) 텔레그램 전달 (브리핑이 생성된 경우만)
     if args.no_deliver:
         print("(--no-deliver) 전송 생략")
         return
-    header = f"📰 데일리 마켓 브리핑 — {today}"
-    asyncio.run(deliver(briefing, header=header))
+    if briefing:
+        asyncio.run(deliver(briefing, header=f"📰 데일리 마켓 브리핑 — {today}"))
+    else:
+        print("브리핑 없음 — 텔레그램 전송 생략")
 
 
 if __name__ == "__main__":
