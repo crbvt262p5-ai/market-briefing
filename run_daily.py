@@ -3,6 +3,7 @@
 매일 cron 으로 실행하는 진입점.
 
 옵션:
+  --slot HH        실행할 시간대 슬롯(예: 07/12/15/17). 생략 시 현재 KST 시각에 가장 가까운 슬롯.
   --no-deliver     텔레그램 전송 생략 (파일만 생성)
   --no-search-ctx  직전 브리핑 요약을 맥락으로 넘기지 않음
   --raw PATH       수집을 건너뛰고 기존 raw JSON 으로 생성만 수행
@@ -20,7 +21,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from collect import collect, save_raw
-from config import load_config, output_dir
+from config import current_slot, load_config, output_dir, slot_by_name
 from deliver import build_digest, deliver
 from generate import generate_briefing, summarize_feed
 
@@ -35,24 +36,25 @@ def extract_tldr(briefing_md: str) -> str | None:
     return m.group(0).strip() if m else None
 
 
-def latest_previous_summary(today: str) -> str | None:
-    """가장 최근(오늘 제외) 브리핑 파일의 TL;DR 을 반환."""
+def latest_previous_summary(key: str) -> str | None:
+    """가장 최근(현재 슬롯 제외) 브리핑 파일의 TL;DR 을 반환."""
     files = sorted(output_dir().glob("briefing_*.md"))
     for path in reversed(files):
-        if path.name == f"briefing_{today}.md":
+        if path.name == f"briefing_{key}.md":
             continue
         return extract_tldr(path.read_text(encoding="utf-8"))
     return None
 
 
-def save_briefing(text: str, date_str: str) -> Path:
-    path = output_dir() / f"briefing_{date_str}.md"
+def save_briefing(text: str, key: str) -> Path:
+    path = output_dir() / f"briefing_{key}.md"
     path.write_text(text, encoding="utf-8")
     return path
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="데일리 마켓 브리핑 파이프라인")
+    ap.add_argument("--slot", metavar="HH", help="시간대 슬롯(07/12/15/17). 생략 시 현재 시각 기준 자동")
     ap.add_argument("--no-deliver", action="store_true", help="텔레그램 전송 생략")
     ap.add_argument("--no-search-ctx", action="store_true", help="직전 브리핑 맥락 미사용")
     ap.add_argument("--raw", metavar="PATH", help="기존 raw JSON 으로 생성만 수행")
@@ -60,35 +62,38 @@ def main() -> None:
 
     cfg = load_config()
     today = _today_str(cfg)
+    slot = slot_by_name(args.slot, cfg) if args.slot else current_slot(cfg)
+    key = f"{today}_{slot['name']}"  # 예: 2026-06-24_17
+    print(f"▶ 슬롯 {slot['name']}시 (최근 {slot['lookback_hours']}시간) — key={key}")
 
     # 1) 수집 (+ 기사 본문 추출). raw 를 먼저 저장 → 이후 단계가 실패해도 '전체 피드'는 살아있음.
     if args.raw:
         items = json.loads(Path(args.raw).read_text(encoding="utf-8"))
         print(f"기존 raw 사용: {args.raw} ({len(items)}건)")
     else:
-        items = asyncio.run(collect())
-        save_raw(items, today)
+        items = asyncio.run(collect(lookback_hours=slot["lookback_hours"]))
+        save_raw(items, key)
 
     if not items:
         print("수집된 메시지가 없습니다. 채널 설정/세션을 확인하세요. 종료.")
         return
 
-    # 2) 피드 항목별 AI 요약 (best-effort — 크레딧 없으면 건너뜀, 피드는 추출본문 유지)
+    # 2) 피드 항목별 AI 요약 (best-effort — 크레딧 없으면 건너뜀, 피드는 원문 유지)
     print("피드 요약 중...")
     items = summarize_feed(items)
-    save_raw(items, today)  # 요약 반영해 재저장
+    save_raw(items, key)  # 요약 반영해 재저장
 
     # 3) 핵심 브리핑 생성 (best-effort)
     prev = None
     if cfg["keep_previous_summary"] and not args.no_search_ctx:
-        prev = latest_previous_summary(today)
+        prev = latest_previous_summary(key)
         if prev:
             print("직전 브리핑 핵심을 맥락으로 전달")
     briefing = None
     try:
         print("핵심 브리핑 생성 중...")
         briefing = generate_briefing(items, prev_summary=prev, focus=cfg.get("focus") or None)
-        print("브리핑 저장:", save_briefing(briefing, today))
+        print("브리핑 저장:", save_briefing(briefing, key))
     except Exception as e:  # noqa: BLE001
         print(f"브리핑 생성 실패(피드·대시보드는 계속): {str(e)[:160]}")
 
@@ -101,14 +106,15 @@ def main() -> None:
     url = cfg.get("dashboard_url")
     pw = os.environ.get("SITE_PASSWORD")
     dash = f"{url}#pw={quote(pw)}" if (url and pw) else url
+    label = f"{today} {slot['name']}시"
 
     if briefing:
         body = briefing + (f"\n\n🔗 대시보드(탭하면 열림): {dash}" if dash else "")
-        asyncio.run(deliver(body, header=f"📰 데일리 마켓 브리핑 — {today}"))
+        asyncio.run(deliver(body, header=f"📰 데일리 마켓 브리핑 — {label}"))
     else:
         # 크레딧 미충전 등으로 브리핑이 없으면, 수집 피드 다이제스트라도 보낸다
         print("브리핑 없음 — 수집 피드 다이제스트 전송")
-        digest = build_digest(items, today, dash)
+        digest = build_digest(items, label, dash)
         asyncio.run(deliver(digest))
 
 

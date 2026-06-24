@@ -16,13 +16,27 @@ channels:
   # 반도체 / 테크
   - "@KISemicon"          # 한투 테크팀
   - "@kiwoom_semibat"     # 키움 반도체/이차전지
+  # 해외선물 / 글로벌 뉴스 (물량 多 — 주요 뉴스 선별 대상)
+  - "@kwtok"              # 키움증권 해외선물 톡톡
   # 채권
   - "@deandatbond"        # 하나 해외채권 허성우
   # 종합 리포트 / 뉴스
   - "@companyreport"      # 증권사 리포트
   - "@hankyung_fin"       # 한국경제
 
-# 수집 범위 (시간). cron 을 매일 1회 돌린다면 24가 적당합니다.
+# 하루 4회 시간대 분할 실행. name=KST 기준 시각(시), lookback_hours=직전 슬롯 이후 범위.
+# 07시=전날 17시~(밤사이 미국장), 12시=07시~, 15시=12시~, 17시=15시~ (중복 없음)
+slots:
+  - { name: "07", lookback_hours: 14 }
+  - { name: "12", lookback_hours: 5 }
+  - { name: "15", lookback_hours: 3 }
+  - { name: "17", lookback_hours: 2 }
+
+# 수집에서 제외할 노이즈 패턴(부분일치). 키움 해외선물의 [AI시그널] 자동 기술분석 도배 등.
+exclude_patterns:
+  - "[AI시그널]"
+
+# 수집 범위 기본값(시간). slots/--slot 으로 슬롯 실행 시에는 슬롯별 lookback 이 우선합니다.
 lookback_hours: 24
 
 # 타임존 (출력 timestamp 표기에 사용)

@@ -2,10 +2,17 @@ name: daily-briefing
 
 on:
   schedule:
-    # 매주 일~목 22:00 UTC = 월~금 07:00 KST (장 시작 전)
-    - cron: "0 22 * * 0-4"
+    # 하루 4회(월~금 KST). run_daily.py 가 현재 KST 시각으로 슬롯을 자동 판별.
+    - cron: "0 22 * * 0-4"   # 07:00 KST (장 시작 전, 밤사이 미국장)
+    - cron: "0 3 * * 1-5"    # 12:00 KST (오전 마감)
+    - cron: "0 6 * * 1-5"    # 15:00 KST (장중)
+    - cron: "0 8 * * 1-5"    # 17:00 KST (장 마감 후)
   workflow_dispatch:
     inputs:
+      slot:
+        description: "강제 실행할 슬롯(07/12/15/17). 비우면 현재 시각 기준 자동"
+        type: string
+        default: ""
       skip_pipeline:
         description: "수집·생성·전송을 건너뛰고 사이트만 다시 빌드"
         type: boolean
@@ -45,7 +52,7 @@ jobs:
           TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
-        run: python run_daily.py
+        run: python run_daily.py ${{ inputs.slot && format('--slot {0}', inputs.slot) || '' }}
 
       - name: Build encrypted static site
         env:

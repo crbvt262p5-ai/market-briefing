@@ -46,9 +46,10 @@ def decrypt(payload: dict, password: str) -> str:
 
 
 def local_briefings() -> dict[str, str]:
+    # 키 = 날짜 또는 날짜_슬롯(예: 2026-06-24 / 2026-06-24_17)
     out = {}
     for p in sorted(BRIEFINGS.glob("briefing_*.md")):
-        m = re.match(r"briefing_(\d{4}-\d{2}-\d{2})\.md", p.name)
+        m = re.match(r"briefing_(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\.md", p.name)
         if m:
             out[m.group(1)] = p.read_text(encoding="utf-8")
     return out
@@ -57,7 +58,7 @@ def local_briefings() -> dict[str, str]:
 def local_feeds() -> dict[str, list]:
     feeds: dict[str, list] = {}
     for p in sorted(BRIEFINGS.glob("raw_*.json")):
-        m = re.match(r"raw_(\d{4}-\d{2}-\d{2})\.json", p.name)
+        m = re.match(r"raw_(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\.json", p.name)
         if not m:
             continue
         try:
@@ -243,6 +244,7 @@ let DATA=null, CUR=null, VIEW='brief';
 
 function dates(){ return Object.keys(DATA.briefings||{}).concat(Object.keys(DATA.feeds||{}))
   .filter((v,i,a)=>a.indexOf(v)===i).sort().reverse(); }
+function label(k){ const m=(k||'').match(/^(\d{4}-\d{2}-\d{2})_(\d{2})$/); return m?`${m[1]} ${m[2]}시`:k; }
 
 function renderBrief(){
   const md=(DATA.briefings||{})[CUR]||'_이 날짜의 브리핑이 아직 없습니다. (생성 단계는 크레딧 필요)_';
@@ -296,7 +298,7 @@ async function unlock(){
   document.getElementById('gate').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   const sel=document.getElementById('dateSel');
-  const ds=dates(); sel.innerHTML=ds.map(d=>`<option>${d}</option>`).join('');
+  const ds=dates(); sel.innerHTML=ds.map(d=>`<option value="${d}">${label(d)}</option>`).join('');
   CUR=ds[0]; sel.onchange=()=>{CUR=sel.value;render();};
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setView(t.dataset.view));
   document.getElementById('chSel').onchange=renderFeed;

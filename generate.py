@@ -87,18 +87,38 @@ def generate_briefing(
     return text
 
 
-def summarize_feed(items: list[dict]) -> list[dict]:
-    """각 항목의 추출 본문을 2~3문장으로 요약해 item['summary'] 에 채운다.
+# 메시지 본문 자체가 충분히 길면(링크 없이도) 요약 대상으로 본다 — 키움 해외선물처럼
+# 뉴스 전문이 텍스트에 담기는 채널 대응.
+TEXT_SUMMARY_MIN = 200
+# 한 번에 요약할 최대 항목 수(밤사이 누적 시 토큰·비용 폭주 방지). 최신순 우선.
+MAX_SUMMARIZE = 80
 
-    본문이 있는 항목만 대상. 구조화 출력(JSON)으로 한 번에 요약. 실패 시 예외를 올리지
-    않고 원본 그대로 반환(피드는 추출 본문으로 계속 표시됨)."""
-    targets = [(i, it) for i, it in enumerate(items)
-               if any(a.get("text") for a in it.get("articles", []))]
-    if not targets:
+
+def _summary_body(it: dict) -> str | None:
+    """요약에 쓸 본문을 고른다: 추출 기사 본문 우선, 없으면 충분히 긴 메시지 텍스트."""
+    arts = "\n".join(a.get("text", "") for a in it.get("articles", []) if a.get("text"))
+    if arts.strip():
+        return arts[:3000]
+    text = (it.get("text", "") or "").strip()
+    if len(text) >= TEXT_SUMMARY_MIN:
+        return text[:3000]
+    return None
+
+
+def summarize_feed(items: list[dict]) -> list[dict]:
+    """각 항목을 2~3문장으로 요약해 item['summary'] 에 채운다.
+
+    링크 기사 본문이 있는 항목 + 본문이 긴 텍스트 메시지(키움 해외선물 등)를 모두 대상으로
+    한다. 구조화 출력(JSON)으로 한 번에 요약. 실패 시 예외를 올리지 않고 원본 그대로
+    반환(피드는 원문으로 계속 표시됨)."""
+    cand = [(i, it, _summary_body(it)) for i, it in enumerate(items)]
+    cand = [(i, it, b) for i, it, b in cand if b]
+    if not cand:
         return items
+    # 항목이 많으면 최신(뒤쪽) 우선으로 상한 적용
+    targets = cand[-MAX_SUMMARIZE:] if len(cand) > MAX_SUMMARIZE else cand
     payload = []
-    for i, it in targets:
-        body = "\n".join(a.get("text", "") for a in it["articles"] if a.get("text"))[:3000]
+    for i, it, body in targets:
         payload.append({"i": i, "headline": (it.get("text", "") or "")[:120], "body": body})
 
     client = anthropic.Anthropic()
