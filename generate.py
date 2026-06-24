@@ -92,6 +92,21 @@ def generate_briefing(
 TEXT_SUMMARY_MIN = 200
 # 한 번에 요약할 최대 항목 수(밤사이 누적 시 토큰·비용 폭주 방지). 최신순 우선.
 MAX_SUMMARIZE = 80
+# 한 요청당 요약 항목 수. 너무 많으면 출력 JSON 이 max_tokens 에 잘려 파싱 실패하므로 분할.
+SUMMARIZE_BATCH = 15
+
+_SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {"summaries": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"i": {"type": "integer"}, "s": {"type": "string"}},
+        "required": ["i", "s"], "additionalProperties": False}}},
+    "required": ["summaries"], "additionalProperties": False,
+}
+_SUMMARY_SYSTEM = (
+    "너는 금융 뉴스/리포트 요약가다. 각 기사를 한국어로 2~3문장, 쉬운 말로 핵심만 "
+    "요약하라. 숫자·고유명사는 살리되 군더더기는 빼라. 투자 추천은 하지 마라."
+)
 
 
 def _summary_body(it: dict) -> str | None:
@@ -105,49 +120,49 @@ def _summary_body(it: dict) -> str | None:
     return None
 
 
+def _summarize_batch(client, payload: list[dict], items: list[dict]) -> int:
+    """payload 한 묶음을 요약해 items[idx]['summary'] 에 채운다. 채운 개수 반환."""
+    resp = client.messages.create(
+        model=MODEL,
+        max_tokens=8000,
+        output_config={"format": {"type": "json_schema", "schema": _SUMMARY_SCHEMA}},
+        system=_SUMMARY_SYSTEM,
+        messages=[{"role": "user", "content":
+                   '아래 기사들을 각각 요약해 JSON 으로만 답하라.\n\n'
+                   + json.dumps(payload, ensure_ascii=False)}],
+    )
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    n = 0
+    for s in json.loads(text).get("summaries", []):
+        idx = s.get("i")
+        if isinstance(idx, int) and 0 <= idx < len(items):
+            items[idx]["summary"] = s.get("s")
+            n += 1
+    return n
+
+
 def summarize_feed(items: list[dict]) -> list[dict]:
     """각 항목을 2~3문장으로 요약해 item['summary'] 에 채운다.
 
     링크 기사 본문이 있는 항목 + 본문이 긴 텍스트 메시지(키움 해외선물 등)를 모두 대상으로
-    한다. 구조화 출력(JSON)으로 한 번에 요약. 실패 시 예외를 올리지 않고 원본 그대로
-    반환(피드는 원문으로 계속 표시됨)."""
+    한다. 항목이 많으면 출력 JSON 이 잘리지 않도록 배치로 나눠 요청한다. 배치 단위로
+    best-effort — 일부 배치가 실패해도 나머지는 요약된다."""
     cand = [(i, it, _summary_body(it)) for i, it in enumerate(items)]
     cand = [(i, it, b) for i, it, b in cand if b]
     if not cand:
         return items
     # 항목이 많으면 최신(뒤쪽) 우선으로 상한 적용
     targets = cand[-MAX_SUMMARIZE:] if len(cand) > MAX_SUMMARIZE else cand
-    payload = []
-    for i, it, body in targets:
-        payload.append({"i": i, "headline": (it.get("text", "") or "")[:120], "body": body})
+    payload = [{"i": i, "headline": (it.get("text", "") or "")[:120], "body": body}
+               for i, it, body in targets]
 
     client = anthropic.Anthropic()
-    schema = {
-        "type": "object",
-        "properties": {"summaries": {"type": "array", "items": {
-            "type": "object",
-            "properties": {"i": {"type": "integer"}, "s": {"type": "string"}},
-            "required": ["i", "s"], "additionalProperties": False}}},
-        "required": ["summaries"], "additionalProperties": False,
-    }
-    try:
-        resp = client.messages.create(
-            model=MODEL,
-            max_tokens=8000,
-            output_config={"format": {"type": "json_schema", "schema": schema}},
-            system=(
-                "너는 금융 뉴스/리포트 요약가다. 각 기사를 한국어로 2~3문장, 쉬운 말로 핵심만 "
-                "요약하라. 숫자·고유명사는 살리되 군더더기는 빼라. 투자 추천은 하지 마라."
-            ),
-            messages=[{"role": "user", "content":
-                       '아래 기사들을 각각 요약해 JSON 으로만 답하라.\n\n'
-                       + json.dumps(payload, ensure_ascii=False)}],
-        )
-        text = "".join(b.text for b in resp.content if b.type == "text")
-        for s in json.loads(text).get("summaries", []):
-            idx = s.get("i")
-            if isinstance(idx, int) and 0 <= idx < len(items):
-                items[idx]["summary"] = s.get("s")
-    except Exception as e:  # noqa: BLE001
-        print(f"  (피드 요약 건너뜀: {str(e)[:100]})")
+    done = 0
+    for start in range(0, len(payload), SUMMARIZE_BATCH):
+        batch = payload[start:start + SUMMARIZE_BATCH]
+        try:
+            done += _summarize_batch(client, batch, items)
+        except Exception as e:  # noqa: BLE001
+            print(f"  (요약 배치 {start // SUMMARIZE_BATCH + 1} 건너뜀: {str(e)[:100]})")
+    print(f"  피드 요약 완료: {done}/{len(payload)}건")
     return items
