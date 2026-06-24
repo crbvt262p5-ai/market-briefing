@@ -25,11 +25,11 @@ channels:
   - "@hankyung_fin"       # 한국경제
 
 # 하루 4회 시간대 분할 실행. name=KST 기준 시각(시), lookback_hours=직전 슬롯 이후 범위.
-# 07시=전날 17시~(밤사이 미국장), 12시=07시~, 15시=12시~, 17시=15시~ (중복 없음)
+# 07시=전날 17시~(밤사이 미국장), 11시=07시~, 15시=11시~, 17시=15시~ (중복 없음)
 slots:
   - { name: "07", lookback_hours: 14 }
-  - { name: "12", lookback_hours: 5 }
-  - { name: "15", lookback_hours: 3 }
+  - { name: "11", lookback_hours: 4 }
+  - { name: "15", lookback_hours: 4 }
   - { name: "17", lookback_hours: 2 }
 
 # 수집에서 제외할 노이즈 패턴(부분일치). 키움 해외선물의 [AI시그널] 자동 기술분석 도배 등.
