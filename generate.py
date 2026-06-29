@@ -9,7 +9,13 @@ from config import ROOT
 
 MODEL = "claude-sonnet-4-6"  # 비용 절감(입력 $3/출력 $15). 품질↑ 원하면 claude-opus-4-8
 # Opus 4.8/4.7/4.6 + Sonnet 4.6 에서 동적 필터링을 지원하는 최신 웹검색 도구.
-WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search"}
+# max_uses: 서버측 검색 횟수 상한. pause_turn 루프가 누적 대화를 재전송하므로 검색이
+# 많아질수록 토큰이 곱셈으로 불어난다 → 상한을 둬 비용 폭주를 막는다.
+WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 3}
+
+# 브리핑 입력으로 보낼 항목당 메시지 본문 길이 상한. 전체 본문은 이미 summarize_feed 가
+# 요약(summary)으로 압축했으므로, 브리핑엔 요약 + 짧은 원문만 보내 입력 토큰을 줄인다.
+BRIEFING_TEXT_CAP = 600
 
 
 def _load_system_prompt() -> str:
@@ -17,11 +23,29 @@ def _load_system_prompt() -> str:
         return f.read()
 
 
+def _slim_for_briefing(items: list[dict]) -> list[dict]:
+    """브리핑 입력용으로 항목을 슬림화한다. 본문은 이미 summary 로 압축돼 있으므로
+    요약 + 짧은 원문만 남기고, 기사 전문/urls/캡션 등 무거운 필드는 뺀다."""
+    slim = []
+    for it in items:
+        s = {
+            "timestamp": it.get("timestamp"),
+            "channel": it.get("channel"),
+            "text": (it.get("text", "") or "")[:BRIEFING_TEXT_CAP],
+            "link": it.get("link"),
+        }
+        if it.get("summary"):
+            s["summary"] = it["summary"]
+        slim.append(s)
+    return slim
+
+
 def _build_user_message(items: list[dict], prev_summary: str | None, focus: str | None) -> str:
     parts = [
-        "아래는 오늘 수집된 텔레그램 메시지 JSON 배열입니다. 이 데이터를 분석해 "
-        "프롬프트에 정의된 형식대로 한국어 마켓 브리핑을 작성하세요.\n\n"
-        "```json\n" + json.dumps(items, ensure_ascii=False, indent=2) + "\n```"
+        "아래는 오늘 수집된 텔레그램 메시지 JSON 배열입니다. 각 항목의 summary 는 원문을 "
+        "요약한 것이고 text 는 원문 일부입니다. 이 데이터를 분석해 프롬프트에 정의된 "
+        "형식대로 한국어 마켓 브리핑을 작성하세요.\n\n"
+        "```json\n" + json.dumps(_slim_for_briefing(items), ensure_ascii=False, indent=2) + "\n```"
     ]
     if prev_summary:
         parts.append(
@@ -60,7 +84,7 @@ def generate_briefing(
                 }
             ],
             thinking={"type": "adaptive"},
-            output_config={"effort": "high"},
+            output_config={"effort": "medium"},
             tools=[WEB_SEARCH_TOOL],
             messages=messages,
         ) as stream:
