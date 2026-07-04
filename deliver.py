@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import html
+import re
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -10,6 +12,57 @@ from config import load_config, telegram_credentials
 
 # 텔레그램 단일 메시지 길이 한도(4096)보다 약간 여유를 둠.
 CHUNK_LIMIT = 3900
+
+# 대시보드 렌더링용 구분선.
+DIVIDER = "━━━━━━━━━━━━"
+_HR_CHARS = {"-", "*", "_"}
+
+
+def _inline(s: str) -> str:
+    """이미 HTML 이스케이프된 문자열에서 **굵게**/*기울임*을 텔레그램 태그로 변환."""
+    s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    s = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"<i>\1</i>", s)
+    return s
+
+
+def to_telegram_html(md: str) -> str:
+    """브리핑 마크다운을 텔레그램 HTML '대시보드' 형식으로 변환한다.
+
+    - `#`~`###` 제목 → 위에 구분선 + <b>굵은 제목</b>
+    - `---`/`***` 수평선 → 제거(제목이 구분을 담당)
+    - `- `/`* ` 불릿 → `•`
+    - `▸ ` 채널 헤더(다이제스트) → 굵게
+    - **굵게**/*기울임* → <b>/<i>
+    태그는 항상 한 줄 안에서 닫히므로 줄 경계로 분할해도 깨지지 않는다."""
+    out: list[str] = []
+    for raw in md.splitlines():
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            out.append("")
+            continue
+        # 수평선(---, ***, ___)은 버린다 — 제목 위 구분선이 대신한다.
+        if len(stripped) >= 3 and set(stripped) <= _HR_CHARS:
+            continue
+        m = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if m:
+            out.append("")
+            out.append(DIVIDER)
+            out.append(f"<b>{_inline(html.escape(m.group(2)))}</b>")
+            continue
+        m = re.match(r"^[-*]\s+(.*)$", line)
+        if m:
+            out.append("• " + _inline(html.escape(m.group(1))))
+            continue
+        if stripped.startswith("▸ "):
+            out.append(f"<b>{_inline(html.escape(stripped))}</b>")
+            continue
+        out.append(_inline(html.escape(line)))
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    # 맨 앞에 붙은 구분선 제거(최상단 제목 위).
+    if text.startswith(DIVIDER):
+        text = text[len(DIVIDER):].lstrip("\n")
+    return text
 
 
 def build_digest(items: list[dict], date: str, dashboard_url: str | None = None) -> str:
@@ -34,6 +87,33 @@ def build_digest(items: list[dict], date: str, dashboard_url: str | None = None)
             link = it.get("link")
             lines.append(f"• {head}" + (f"\n  {link}" if link else ""))
     return "\n".join(lines)
+
+
+def core_headlines(briefing_md: str, limit: int = 5) -> list[str]:
+    """브리핑의 '📌 핵심 N줄' 섹션에서 각 불릿의 굵은 헤드라인만 뽑는다."""
+    m = re.search(r"###\s*📌[^\n]*\n(.*?)(?=\n###|\n---|\Z)", briefing_md, re.S)
+    if not m:
+        return []
+    heads: list[str] = []
+    for ln in m.group(1).splitlines():
+        ln = ln.strip()
+        if ln.startswith(("- ", "* ")):
+            b = re.search(r"\*\*(.+?)\*\*", ln)
+            heads.append((b.group(1) if b else ln[2:]).strip()[:80])
+    return heads[:limit]
+
+
+def build_teaser(briefing_md: str, label: str, dashboard_url: str | None) -> str:
+    """텔레그램용 짧은 티저 카드 — 핵심 헤드라인 + 대시보드 링크. 전문은 웹에서."""
+    heads = core_headlines(briefing_md)
+    parts = [f"## 📊 마켓 브리핑 · {label}"]
+    if heads:
+        parts.append("### 오늘의 핵심\n" + "\n".join(f"- {h}" for h in heads))
+    else:
+        parts.append("_핵심 요약을 불러오지 못했습니다. 대시보드에서 확인하세요._")
+    if dashboard_url:
+        parts.append(f"👉 전체 브리핑·피드 대시보드 열기 (탭)\n{dashboard_url}")
+    return "\n\n".join(parts)
 
 
 def split_message(text: str, limit: int = CHUNK_LIMIT) -> list[str]:
@@ -63,14 +143,18 @@ async def deliver(text: str, header: str | None = None) -> None:
     api_id, api_hash, session = telegram_credentials()
     target = cfg["deliver_to"]
 
-    body = f"{header}\n\n{text}" if header else text
+    # 헤더는 최상단 제목으로(마크다운 h2 → 대시보드 굵은 제목), 본문과 함께 HTML 렌더.
+    raw = f"## {header}\n\n{text}" if header else text
+    body = to_telegram_html(raw)
     chunks = split_message(body)
 
     async with TelegramClient(StringSession(session), api_id, api_hash) as client:
         for i, chunk in enumerate(chunks, 1):
-            suffix = f"\n\n— ({i}/{len(chunks)})" if len(chunks) > 1 else ""
-            # parse_mode=None: 마크다운 기호(###, ** 등)를 그대로 평문 전송해 엔티티 오류 방지.
-            await client.send_message(target, chunk + suffix, parse_mode=None)
+            suffix = f"\n\n<i>— ({i}/{len(chunks)})</i>" if len(chunks) > 1 else ""
+            # parse_mode='html': 태그는 항상 한 줄 안에서 닫혀 분할해도 안전.
+            await client.send_message(
+                target, chunk + suffix, parse_mode="html", link_preview=False
+            )
     print(f"전달 완료: {target} 로 {len(chunks)}개 메시지 전송")
 
 

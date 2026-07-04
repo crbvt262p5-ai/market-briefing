@@ -22,8 +22,9 @@ from zoneinfo import ZoneInfo
 
 from collect import collect, save_raw
 from config import current_slot, load_config, output_dir, slot_by_name
-from deliver import build_digest, deliver
+from deliver import build_teaser, deliver
 from generate import generate_briefing, summarize_feed
+from insights import build_core_markdown
 
 
 def _today_str(cfg: dict) -> str:
@@ -83,7 +84,9 @@ def main() -> None:
     items = summarize_feed(items)
     save_raw(items, key)  # 요약 반영해 재저장
 
-    # 3) 핵심 브리핑 생성 (best-effort)
+    label = f"{today} {slot['name']}시"  # 폴백 핵심·티저 양쪽에서 사용
+
+    # 3) 핵심 브리핑 생성 (best-effort). 실패(크레딧 0 등) 시 토큰 없이 로컬 자동 핵심으로 대체.
     prev = None
     if cfg["keep_previous_summary"] and not args.no_search_ctx:
         prev = latest_previous_summary(key)
@@ -93,11 +96,14 @@ def main() -> None:
     try:
         print("핵심 브리핑 생성 중...")
         briefing = generate_briefing(items, prev_summary=prev, focus=cfg.get("focus") or None)
-        print("브리핑 저장:", save_briefing(briefing, key))
     except Exception as e:  # noqa: BLE001
-        print(f"브리핑 생성 실패(피드·대시보드는 계속): {str(e)[:160]}")
+        print(f"AI 브리핑 생성 실패 → 자동 추출 핵심으로 대체: {str(e)[:140]}")
+    if not briefing:
+        # 여러 채널에서 반복 언급된 키워드 = 그날의 핵심 (토큰 0). 핵심 탭이 비지 않게 항상 채운다.
+        briefing = build_core_markdown(items, label)
+    print("브리핑 저장:", save_briefing(briefing, key))
 
-    # 4) 텔레그램 전달 (브리핑이 생성된 경우만)
+    # 4) 텔레그램 전달
     if args.no_deliver:
         print("(--no-deliver) 전송 생략")
         return
@@ -106,16 +112,9 @@ def main() -> None:
     url = cfg.get("dashboard_url")
     pw = os.environ.get("SITE_PASSWORD")
     dash = f"{url}#pw={quote(pw)}" if (url and pw) else url
-    label = f"{today} {slot['name']}시"
 
-    if briefing:
-        body = briefing + (f"\n\n🔗 대시보드(탭하면 열림): {dash}" if dash else "")
-        asyncio.run(deliver(body, header=f"📰 데일리 마켓 브리핑 — {label}"))
-    else:
-        # 크레딧 미충전 등으로 브리핑이 없으면, 수집 피드 다이제스트라도 보낸다
-        print("브리핑 없음 — 수집 피드 다이제스트 전송")
-        digest = build_digest(items, label, dash)
-        asyncio.run(deliver(digest))
+    # 텔레그램엔 짧은 티저 카드(핵심 헤드라인 + 링크)만. 전문은 웹 대시보드에서.
+    asyncio.run(deliver(build_teaser(briefing, label, dash)))
 
 
 if __name__ == "__main__":
