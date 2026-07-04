@@ -79,25 +79,31 @@ def main() -> None:
         print("수집된 메시지가 없습니다. 채널 설정/세션을 확인하세요. 종료.")
         return
 
-    # 2) 피드 항목별 AI 요약 (best-effort — 크레딧 없으면 건너뜀, 피드는 원문 유지)
-    print("피드 요약 중...")
-    items = summarize_feed(items)
-    save_raw(items, key)  # 요약 반영해 재저장
-
     label = f"{today} {slot['name']}시"  # 폴백 핵심·티저 양쪽에서 사용
+    # 이 슬롯에서 유료 Claude(요약+AI 브리핑)를 쓸지. 비용절감: 밤사이(07시)만 true 권장.
+    use_ai = slot.get("ai", True)
 
-    # 3) 핵심 브리핑 생성 (best-effort). 실패(크레딧 0 등) 시 토큰 없이 로컬 자동 핵심으로 대체.
-    prev = None
-    if cfg["keep_previous_summary"] and not args.no_search_ctx:
-        prev = latest_previous_summary(key)
-        if prev:
-            print("직전 브리핑 핵심을 맥락으로 전달")
+    # 2) 피드 항목별 AI 요약 — 유료 슬롯에서만. (아니면 피드는 원문 유지, 토큰 0)
+    if use_ai:
+        print("피드 요약 중...")
+        items = summarize_feed(items)
+        save_raw(items, key)  # 요약 반영해 재저장
+    else:
+        print(f"슬롯 {slot['name']}시: 무료 모드(ai:false) — 요약/AI 브리핑 생략, 키워드 핵심 사용")
+
+    # 3) 핵심 브리핑 — 유료 슬롯은 AI 생성(실패 시 폴백), 무료 슬롯은 바로 키워드 핵심.
     briefing = None
-    try:
-        print("핵심 브리핑 생성 중...")
-        briefing = generate_briefing(items, prev_summary=prev, focus=cfg.get("focus") or None)
-    except Exception as e:  # noqa: BLE001
-        print(f"AI 브리핑 생성 실패 → 자동 추출 핵심으로 대체: {str(e)[:140]}")
+    if use_ai:
+        prev = None
+        if cfg["keep_previous_summary"] and not args.no_search_ctx:
+            prev = latest_previous_summary(key)
+            if prev:
+                print("직전 브리핑 핵심을 맥락으로 전달")
+        try:
+            print("핵심 브리핑 생성 중...")
+            briefing = generate_briefing(items, prev_summary=prev, focus=cfg.get("focus") or None)
+        except Exception as e:  # noqa: BLE001
+            print(f"AI 브리핑 생성 실패 → 자동 추출 핵심으로 대체: {str(e)[:140]}")
     if not briefing:
         # 여러 채널에서 반복 언급된 키워드 = 그날의 핵심 (토큰 0). 핵심 탭이 비지 않게 항상 채운다.
         briefing = build_core_markdown(items, label)
