@@ -20,6 +20,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from insights import is_single_stock
+
 ROOT = Path(__file__).resolve().parent
 BRIEFINGS = ROOT / "briefings"
 DOCS = ROOT / "docs"
@@ -87,6 +89,7 @@ def local_feeds() -> dict[str, list]:
                     "tlink": it.get("link"),
                     "summary": it.get("summary"),
                     "arts": arts,
+                    "ss": 1 if is_single_stock(it) else 0,  # 개별 소형주 노이즈(기본 숨김)
                 }
             )
         feeds[m.group(1)] = feed
@@ -156,7 +159,10 @@ HTML = r"""<!doctype html>
 
   /* 피드 */
   .feedbar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
-  .feedbar input{flex:1;min-width:160px;}
+  .feedbar input[type=text],.feedbar input#q{flex:1;min-width:160px;}
+  .sstoggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;
+    white-space:nowrap;user-select:none;cursor:pointer;}
+  .ssbadge{font-size:11px;color:#b45309;background:#fef3c7;border-radius:6px;padding:2px 7px;margin-left:6px;}
   .meta{color:var(--muted);font-size:13px;margin:2px 0 14px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 17px;
     margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);}
@@ -219,6 +225,7 @@ HTML = r"""<!doctype html>
       <div class="feedbar">
         <select id="chSel"></select>
         <input id="q" placeholder="검색 (제목·본문)">
+        <label class="sstoggle"><input type="checkbox" id="ssToggle"> 개별 소형주 포함</label>
       </div>
       <div class="meta" id="feedMeta"></div>
       <div id="cards"></div>
@@ -260,10 +267,14 @@ function renderFeed(){
     chSel.dataset.date=CUR;
   }
   const ch=chSel.value, q=document.getElementById('q').value.trim().toLowerCase();
+  const showSS=document.getElementById('ssToggle').checked;
   let rows=feed.slice().reverse();
   if(ch) rows=rows.filter(r=>r.ch===ch);
   if(q) rows=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(q));
-  document.getElementById('feedMeta').textContent=`${rows.length}건`;
+  const nSS=rows.filter(r=>r.ss).length;
+  if(!showSS) rows=rows.filter(r=>!r.ss);
+  document.getElementById('feedMeta').textContent =
+    `${rows.length}건` + (!showSS && nSS ? ` · 개별 소형주 ${nSS}건 숨김` : '');
   document.getElementById('cards').innerHTML=rows.map(card).join('') ||
     '<div class="meta">표시할 항목이 없습니다.</div>';
 }
@@ -280,7 +291,8 @@ function card(r){
   const links=[];
   if(r.tlink) links.push(`<a href="${esc(r.tlink)}" target="_blank">텔레그램 ↗</a>`);
   (r.arts||[]).forEach((a,i)=>{ if(a.url) links.push(`<a href="${esc(a.url)}" target="_blank">원문${(r.arts.length>1)?(i+1):''} ↗</a>`); });
-  return `<div class="card"><div class="top"><span class="chip">${esc(r.ch)}</span><span class="time">${t}</span></div>
+  const ssb=r.ss?'<span class="ssbadge">개별종목</span>':'';
+  return `<div class="card"><div class="top"><span class="chip">${esc(r.ch)}</span><span class="time">${t}${ssb}</span></div>
     <div class="head">${esc(r.head)}</div>${sum}${arts}<div class="links">${links.join('')}</div></div>`;
 }
 function render(){ VIEW==='brief'?renderBrief():renderFeed(); }
@@ -303,6 +315,7 @@ async function unlock(){
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setView(t.dataset.view));
   document.getElementById('chSel').onchange=renderFeed;
   document.getElementById('q').oninput=renderFeed;
+  document.getElementById('ssToggle').onchange=renderFeed;
   document.getElementById('logout').onclick=()=>{localStorage.removeItem('mb_pw');location.reload();};
   setView('brief');
 }
