@@ -24,7 +24,7 @@ from collect import collect, save_raw
 from config import current_slot, load_config, output_dir, slot_by_name
 from deliver import build_teaser, deliver
 from generate import generate_briefing, summarize_feed
-from insights import build_core_markdown
+from insights import build_core_markdown, is_single_stock
 
 
 def _today_str(cfg: dict) -> str:
@@ -83,11 +83,16 @@ def main() -> None:
     # 이 슬롯에서 유료 Claude(요약+AI 브리핑)를 쓸지. 비용절감: 밤사이(07시)만 true 권장.
     use_ai = slot.get("ai", True)
 
-    # 2) 피드 항목별 AI 요약 — 유료 슬롯에서만. (아니면 피드는 원문 유지, 토큰 0)
+    # 유료 Claude 입력에서 개별 소형주 노이즈(@kwtok [美특징주] 등)를 뺀다 — 토큰 주범.
+    # 매크로 @kwtok(환율/금리/지표)은 유지. 제외 항목도 raw엔 남아 '전체 피드'에선 보인다.
+    paid_items = [it for it in items if not is_single_stock(it)] if use_ai else items
+
+    # 2) 피드 항목별 AI 요약 — 유료 슬롯에서만, 개별종목 노이즈 제외. (아니면 원문 유지, 토큰 0)
     if use_ai:
-        print("피드 요약 중...")
-        items = summarize_feed(items)
-        save_raw(items, key)  # 요약 반영해 재저장
+        dropped = len(items) - len(paid_items)
+        print(f"피드 요약 중... (개별 소형주 {dropped}건 유료 입력에서 제외)")
+        summarize_feed(paid_items)   # summary 는 각 항목 dict 에 in-place 기록
+        save_raw(items, key)         # 요약 반영해 재저장(전체 항목 유지)
     else:
         print(f"슬롯 {slot['name']}시: 무료 모드(ai:false) — 요약/AI 브리핑 생략, 키워드 핵심 사용")
 
@@ -101,7 +106,7 @@ def main() -> None:
                 print("직전 브리핑 핵심을 맥락으로 전달")
         try:
             print("핵심 브리핑 생성 중...")
-            briefing = generate_briefing(items, prev_summary=prev, focus=cfg.get("focus") or None)
+            briefing = generate_briefing(paid_items, prev_summary=prev, focus=cfg.get("focus") or None)
         except Exception as e:  # noqa: BLE001
             print(f"AI 브리핑 생성 실패 → 자동 추출 핵심으로 대체: {str(e)[:140]}")
     if not briefing:

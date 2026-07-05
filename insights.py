@@ -37,6 +37,11 @@ SYN = {
     "경제지표": "경제지표", "경상수지": "경제지표",
 }
 MACRO = set(SYN.values())
+# '진짜 매크로'(시장 전반 주제). 개별종목 뉴스 구제는 이 집합에만 허용한다 —
+# 소형주가 곁다리로 'AI/반도체'를 언급해도 살려주지 않기 위해(섹터테마는 랭킹용).
+# '금'·'경기'는 소형주 이름/곁다리 언급과 충돌이 잦아 제외(진짜 금값 뉴스는 금리/연준 동반).
+MACRO_STRONG = {"연준", "금리", "환율", "달러", "유가", "인플레이션", "고용", "관세",
+                "코스피", "미국증시", "경제지표"}
 
 # 개별종목(소형주) 뉴스 태그 — 이런 아이템은 핵심 집계에서 제외.
 _SS_TAGS = ("[美특징주]", "[특징주]", "[개장 전 특징주]", "[개장전 특징주]", "[美 특징주]")
@@ -98,11 +103,13 @@ def is_single_stock(item: dict) -> bool:
     """
     text = item.get("text", "") or ""
     ch = item.get("channel", "") or ""
-    if any(t in text for t in _SS_TAGS):
-        return True
     head = _head(text)
+    # 구제는 '헤드라인'의 진짜 매크로(환율/금리/지표 등)로만 — 본문 곁다리 매크로어는 무시.
+    strong = bool(macro_themes(head) & MACRO_STRONG)
+    if any(t in text for t in _SS_TAGS):
+        return not strong
     if ("톡톡" in ch or "해외선물" in ch) and head.startswith("제목"):
-        return not macro_themes(head)
+        return not strong
     return False
 
 
