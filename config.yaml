@@ -24,19 +24,19 @@ channels:
   - "@companyreport"      # 증권사 리포트
   - "@hankyung_fin"       # 한국경제
 
-# 하루 4회 시간대 분할 실행. name=KST 기준 시각(시), lookback_hours=직전 슬롯 이후 범위.
-# 07시=전날 17시~(밤사이 미국장), 11시=07시~, 15시=11시~, 17시=15시~ (중복 없음)
+# 하루 3회 시간대 분할 실행. name=KST 기준 시각(시), lookback_hours=직전 슬롯 이후 범위.
+# 07시=전날 17시~(밤사이 미국장), 12시=07시~, 17시=12시~ (중복 없음)
 # ai: true 인 슬롯만 유료 Claude(피드요약+AI 브리핑) 사용. false 면 무료 키워드 핵심으로 대체.
 # 비용절감: 가장 중요한 밤사이(07시)만 AI, 장중은 무료 핵심. (기본 미지정 시 true)
 slots:
   - { name: "07", lookback_hours: 14, ai: true }
-  - { name: "11", lookback_hours: 4,  ai: false }
-  - { name: "15", lookback_hours: 4,  ai: false }
-  - { name: "17", lookback_hours: 2,  ai: false }
+  - { name: "12", lookback_hours: 5,  ai: false }
+  - { name: "17", lookback_hours: 5,  ai: false }
 
 # 수집에서 제외할 노이즈 패턴(부분일치). 키움 해외선물의 [AI시그널] 자동 기술분석 도배 등.
 exclude_patterns:
   - "[AI시그널]"
+  - "[AI 시그널]"
 
 # 수집 범위 기본값(시간). slots/--slot 으로 슬롯 실행 시에는 슬롯별 lookback 이 우선합니다.
 lookback_hours: 24

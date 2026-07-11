@@ -89,8 +89,11 @@ def build_digest(items: list[dict], date: str, dashboard_url: str | None = None)
     return "\n".join(lines)
 
 
-def core_headlines(briefing_md: str, limit: int = 5) -> list[str]:
-    """브리핑의 '📌 핵심 N줄' 섹션에서 각 불릿의 굵은 헤드라인만 뽑는다."""
+def core_headlines(briefing_md: str, limit: int = 10) -> list[str]:
+    """브리핑의 '📌 핵심' 섹션에서 각 불릿의 굵은 헤드라인을 뽑는다.
+
+    키워드 핵심은 `**키워드** (N개 채널·M건)` 형태라, 뒤따르는 (…) 반복도 태그가
+    있으면 함께 붙여 텔레그램 티저에서도 '여러 채널 반복' 맥락이 드러나게 한다."""
     m = re.search(r"###\s*📌[^\n]*\n(.*?)(?=\n###|\n---|\Z)", briefing_md, re.S)
     if not m:
         return []
@@ -98,8 +101,14 @@ def core_headlines(briefing_md: str, limit: int = 5) -> list[str]:
     for ln in m.group(1).splitlines():
         ln = ln.strip()
         if ln.startswith(("- ", "* ")):
-            b = re.search(r"\*\*(.+?)\*\*", ln)
-            heads.append((b.group(1) if b else ln[2:]).strip()[:80])
+            b = re.search(r"\*\*(.+?)\*\*\s*(\([^)]*\))?", ln)
+            if b:
+                head = b.group(1).strip()
+                if b.group(2):
+                    head = f"{head} {b.group(2)}"
+            else:
+                head = ln[2:].strip()
+            heads.append(head[:80])
     return heads[:limit]
 
 

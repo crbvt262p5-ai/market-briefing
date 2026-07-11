@@ -3,7 +3,7 @@
 매일 cron 으로 실행하는 진입점.
 
 옵션:
-  --slot HH        실행할 시간대 슬롯(예: 07/12/15/17). 생략 시 현재 KST 시각에 가장 가까운 슬롯.
+  --slot HH        실행할 시간대 슬롯(예: 07/12/17). 생략 시 현재 KST 시각에 가장 가까운 슬롯.
   --no-deliver     텔레그램 전송 생략 (파일만 생성)
   --no-search-ctx  직전 브리핑 요약을 맥락으로 넘기지 않음
   --raw PATH       수집을 건너뛰고 기존 raw JSON 으로 생성만 수행
@@ -55,7 +55,7 @@ def save_briefing(text: str, key: str) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="데일리 마켓 브리핑 파이프라인")
-    ap.add_argument("--slot", metavar="HH", help="시간대 슬롯(07/12/15/17). 생략 시 현재 시각 기준 자동")
+    ap.add_argument("--slot", metavar="HH", help="시간대 슬롯(07/12/17). 생략 시 현재 시각 기준 자동")
     ap.add_argument("--no-deliver", action="store_true", help="텔레그램 전송 생략")
     ap.add_argument("--no-search-ctx", action="store_true", help="직전 브리핑 맥락 미사용")
     ap.add_argument("--raw", metavar="PATH", help="기존 raw JSON 으로 생성만 수행")

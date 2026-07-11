@@ -163,22 +163,39 @@ def rank_keywords(items: list[dict], top: int = 8) -> list[dict]:
     ]
 
 
-def build_core_markdown(items: list[dict], label: str, top: int = 6) -> str:
-    """AI 브리핑이 없을 때 핵심 브리핑을 대신할 마크다운(자동 추출)."""
+def build_core_markdown(items: list[dict], label: str, top: int = 14) -> str:
+    """AI 브리핑이 없을 때 핵심 브리핑을 대신할 마크다운(자동 추출).
+
+    '여러 채널에서 반복'된 키워드일수록 그날의 핵심 — 반복(2개 채널 이상) 테마를
+    앞세워 볼륨 있게 나열하고, 그 외 주목 키워드를 뒤에 덧붙인다.
+    티저(core_headlines)는 첫 `### 📌` 섹션에서 헤드라인을 뽑으므로 반복 핵심을 📌로 둔다."""
     kws = rank_keywords(items, top=top)
     n_noise = sum(1 for it in items if is_single_stock(it))
-    lines = [
-        f"## 📊 마켓 브리핑 — {label}", "",
-        "> ⚙️ 자동 추출 요약 (여러 채널에서 반복된 매크로 테마 기준, 개별 소형주 뉴스 "
-        f"{n_noise}건 제외). AI 종합 브리핑은 크레딧 충전 시 생성됩니다.", "",
-        "### 📌 오늘의 핵심 테마",
-    ]
-    if not kws:
-        lines.append("- (수집 데이터에서 반복 테마를 찾지 못했습니다.)")
-    for k in kws:
+    repeated = [k for k in kws if k["channels"] >= 2]
+    single = [k for k in kws if k["channels"] < 2]
+
+    def render(k: dict) -> str:
+        rep = "🔁 " if k["channels"] >= 2 else ""
         mark = "🌐 " if k["macro"] else ""
         tag = f"{k['channels']}개 채널·{k['hits']}건"
         head = f" — {k['head']}" if k["head"] else ""
-        lines.append(f"- {mark}**{k['kw']}** ({tag}){head}")
+        return f"- {rep}{mark}**{k['kw']}** ({tag}){head}"
+
+    lines = [
+        f"## 📊 마켓 브리핑 — {label}", "",
+        "> ⚙️ 자동 추출 요약 — 여러 채널이 함께 다룰수록(반복도) 상위. "
+        f"개별 소형주 뉴스 {n_noise}건은 집계 제외. (AI 종합 브리핑은 크레딧 충전 시)", "",
+    ]
+    if not kws:
+        lines += ["### 📌 오늘의 핵심", "- (수집 데이터에서 반복 테마를 찾지 못했습니다.)"]
+    else:
+        if repeated:
+            lines.append(f"### 📌 반복 핵심 — 여러 채널이 함께 다룬 테마 ({len(repeated)})")
+            lines += [render(k) for k in repeated]
+        # 반복 테마가 없으면 '그 외'를 📌로 승격해 티저가 빈손이 되지 않게 한다.
+        heading = "🧩 그 외 주목 키워드" if repeated else "📌 오늘의 주목 키워드"
+        if single:
+            lines += ["", f"### {heading} ({len(single)})"]
+            lines += [render(k) for k in single]
     lines += ["", "---", "*※ 자동 집계 결과이며 투자 추천이 아닙니다. 원문은 '전체 피드' 참고.*"]
     return "\n".join(lines)

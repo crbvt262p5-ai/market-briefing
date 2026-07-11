@@ -16,9 +16,8 @@ load_dotenv(ROOT / ".env")
 # 슬롯 미지정 시 기본값(KST). 직전 슬롯 이후만 다루도록 lookback 을 잡았다.
 DEFAULT_SLOTS = [
     {"name": "07", "lookback_hours": 14},  # 전날 17시~ (밤사이 미국장)
-    {"name": "11", "lookback_hours": 4},   # 07시~
-    {"name": "15", "lookback_hours": 4},   # 11시~
-    {"name": "17", "lookback_hours": 2},   # 15시~
+    {"name": "12", "lookback_hours": 5},   # 07시~
+    {"name": "17", "lookback_hours": 5},   # 12시~
 ]
 
 

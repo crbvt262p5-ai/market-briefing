@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -12,10 +13,28 @@ from telethon.sessions import StringSession
 from config import load_config, output_dir, telegram_credentials
 from fetch import extract_urls, fetch_many
 
+_LETTER_RE = re.compile(r"[가-힣A-Za-z]")
+_URL_RE = re.compile(r"https?://\S+")
+
 
 def _is_noise(text: str, patterns: list[str]) -> bool:
     """제외 패턴(부분일치) 중 하나라도 걸리면 노이즈로 간주."""
     return any(p and p in text for p in patterns)
+
+
+def _is_low_signal(text: str) -> bool:
+    """기호·숫자만 많고 해석 가능한 언어 텍스트가 거의 없는 메시지면 True(수집 스킵).
+
+    URL 제거 후 한글/영문 글자 수와 비중을 본다 — 표·호가·구분선·이모지 도배 등
+    '읽어도 의미 없는' 메시지를 걸러 하위 단계(요약/브리핑)의 처리량을 아낀다."""
+    body = _URL_RE.sub(" ", text)
+    letters = len(_LETTER_RE.findall(body))
+    compact = len("".join(body.split()))  # 공백 제외 전체 문자 수
+    if compact == 0:
+        return True
+    # 글자가 거의 없거나(<3), 공백 제외 문자 중 글자 비중이 20% 미만이면 해석 곤란한 잡음.
+    # 하한을 낮게 둬 'CPI 3.1%' 같은 짧지만 유효한 헤드라인의 오탐을 피한다.
+    return letters < 3 or (letters / compact) < 0.20
 
 
 async def _collect_channel(client: TelegramClient, channel, cutoff_utc, tz, limit, exclude):
@@ -32,6 +51,7 @@ async def _collect_channel(client: TelegramClient, channel, cutoff_utc, tz, limi
 
     count = 0
     skipped = 0
+    low = 0
     async for msg in client.iter_messages(entity, limit=limit):
         if msg.date < cutoff_utc:
             break
@@ -41,6 +61,9 @@ async def _collect_channel(client: TelegramClient, channel, cutoff_utc, tz, limi
         if _is_noise(text, exclude):
             skipped += 1
             continue  # [AI시그널] 자동 도배 등 노이즈 제외
+        if _is_low_signal(text):
+            low += 1
+            continue  # 기호·숫자만 많고 해석 어려운 메시지는 스킵(처리량 절약)
         link = f"https://t.me/{username}/{msg.id}" if username else None
         items.append(
             {
@@ -53,7 +76,12 @@ async def _collect_channel(client: TelegramClient, channel, cutoff_utc, tz, limi
             }
         )
         count += 1
-    tail = f" (노이즈 {skipped} 제외)" if skipped else ""
+    tails = []
+    if skipped:
+        tails.append(f"노이즈 {skipped}")
+    if low:
+        tails.append(f"저신호 {low}")
+    tail = f" ({', '.join(tails)} 제외)" if tails else ""
     print(f"  · {title}: {count}건{tail}")
     return items
 

@@ -2,15 +2,14 @@ name: daily-briefing
 
 on:
   schedule:
-    # 하루 4회(월~금 KST). run_daily.py 가 현재 KST 시각으로 슬롯을 자동 판별.
+    # 하루 3회(월~금 KST). run_daily.py 가 현재 KST 시각으로 슬롯을 자동 판별.
     - cron: "0 22 * * 0-4"   # 07:00 KST (장 시작 전, 밤사이 미국장)
-    - cron: "0 2 * * 1-5"    # 11:00 KST (오전)
-    - cron: "0 6 * * 1-5"    # 15:00 KST (장중)
+    - cron: "0 3 * * 1-5"    # 12:00 KST (오전)
     - cron: "0 8 * * 1-5"    # 17:00 KST (장 마감 후)
   workflow_dispatch:
     inputs:
       slot:
-        description: "강제 실행할 슬롯(07/12/15/17). 비우면 현재 시각 기준 자동"
+        description: "강제 실행할 슬롯(07/12/17). 비우면 현재 시각 기준 자동"
         type: string
         default: ""
       skip_pipeline:
