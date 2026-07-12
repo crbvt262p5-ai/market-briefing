@@ -8,6 +8,9 @@ import anthropic
 from config import ROOT
 
 MODEL = "claude-sonnet-4-6"  # 비용 절감(입력 $3/출력 $15). 품질↑ 원하면 claude-opus-4-8
+# 항목별 기계적 요약(기사 1건 → 2~3문장)은 저비용 Haiku 로. 문장 종합 브리핑만 Sonnet 유지.
+# Haiku 4.5 는 Sonnet 대비 대략 1/10 비용 → 최대 80건 요약 비용을 크게 절감한다.
+SUMMARIZE_MODEL = "claude-haiku-4-5-20251001"
 # Opus 4.8/4.7/4.6 + Sonnet 4.6 에서 동적 필터링을 지원하는 최신 웹검색 도구.
 # max_uses: 서버측 검색 횟수 상한. pause_turn 루프가 누적 대화를 재전송하므로 검색이
 # 많아질수록 토큰이 곱셈으로 불어난다 → 상한을 둬 비용 폭주를 막는다.
@@ -69,7 +72,13 @@ def generate_briefing(
     client = anthropic.Anthropic()
     system_prompt = _load_system_prompt()
 
-    messages = [{"role": "user", "content": _build_user_message(items, prev_summary, focus)}]
+    # 큰 items 입력을 캐시 블록으로 감싼다 — 웹검색 pause_turn 루프가 같은 대화를 재전송할 때
+    # 이 프리픽스(system + 이 입력)를 정가가 아닌 캐시가(~10%)로 재읽어 비용을 크게 줄인다.
+    messages = [{"role": "user", "content": [{
+        "type": "text",
+        "text": _build_user_message(items, prev_summary, focus),
+        "cache_control": {"type": "ephemeral"},
+    }]}]
 
     response = None
     for _ in range(10):  # 서버측 도구 루프(pause_turn) 안전 상한
@@ -147,7 +156,7 @@ def _summary_body(it: dict) -> str | None:
 def _summarize_batch(client, payload: list[dict], items: list[dict]) -> int:
     """payload 한 묶음을 요약해 items[idx]['summary'] 에 채운다. 채운 개수 반환."""
     resp = client.messages.create(
-        model=MODEL,
+        model=SUMMARIZE_MODEL,
         max_tokens=8000,
         output_config={"format": {"type": "json_schema", "schema": _SUMMARY_SCHEMA}},
         system=_SUMMARY_SYSTEM,
