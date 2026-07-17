@@ -183,6 +183,17 @@ HTML = r"""<!doctype html>
   .md a{word-break:break-all;}
   .md hr{border:0;border-top:1px solid var(--line);margin:22px 0;}
 
+  /* 핵심 3줄 / 오늘 꼭 볼 것 — 불릿을 강조 카드로(수치 배지+방향 컬러바) */
+  .md ul.kul{padding-left:0;list-style:none;}
+  .md ul.kul li{list-style:none;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);
+    border-radius:0 10px 10px 0;padding:11px 14px;margin:8px 0;box-shadow:0 1px 2px rgba(16,24,40,.04);}
+  .md ul.kul li.up{border-left-color:#e34948;}
+  .md ul.kul li.down{border-left-color:#2563eb;}
+  .kli-pct{display:inline-block;font-weight:800;font-size:12px;padding:2px 8px;border-radius:999px;
+    margin:0 7px 2px 0;background:var(--chip);color:#374151;vertical-align:middle;white-space:nowrap;}
+  .kli-pct.up{background:#fdeceb;color:#c0302f;}
+  .kli-pct.down{background:#eaf1ff;color:var(--accent);}
+
   /* 오늘의 핵심 키워드 보드 — 여러 채널이 함께 다룬 반복 이슈(막대=언급건수, 진하기=채널수) */
   .core{margin:0 0 26px;}
   .core .lead{font-size:18px;font-weight:800;color:#111827;margin:0 0 3px;letter-spacing:-.01em;}
@@ -340,10 +351,32 @@ function kfilter(kw){   // 키워드 클릭 → 전체 피드에서 그 키워�
   document.getElementById('q').value=kw;
   setView('feed');
 }
+function enhanceBrief(){   // 핵심 3줄/오늘 꼭 볼 것 불릿 → 수치 배지+방향 컬러 카드로 강조
+  const brief=document.getElementById('brief');
+  brief.querySelectorAll('h2, h3').forEach(h=>{
+    if(!/핵심\s*3줄|오늘\s*꼭\s*볼\s*것/.test(h.textContent)) return;
+    const ul=h.nextElementSibling;
+    if(!ul||ul.tagName!=='UL') return;
+    ul.classList.add('kul');
+    ul.querySelectorAll(':scope > li').forEach(li=>{
+      const t=li.textContent;
+      const m=t.match(/[+-]\d+(\.\d+)?\s?%/)||t.match(/\d+(\.\d+)?\s?%/);
+      if(!m) return;
+      let dir=null;
+      if(/^\+/.test(m[0])||/상승|급등|돌파|확대|증가/.test(t)) dir='up';
+      if(/^-/.test(m[0])||/하락|급락|붕괴|축소|감소/.test(t)) dir='down';
+      if(dir) li.classList.add(dir);
+      const b=document.createElement('span');
+      b.className='kli-pct '+(dir||'');
+      b.textContent=m[0].replace(/\s/g,'');
+      li.prepend(b);
+    });
+  });
+}
 function renderBrief(){
   renderCore();
   const md=(DATA.briefings||{})[CUR], brief=document.getElementById('brief');
-  if(md && md.indexOf('자동 추출 요약')<0) brief.innerHTML=marked.parse(md);      // AI 종합 브리핑
+  if(md && md.indexOf('자동 추출 요약')<0){ brief.innerHTML=marked.parse(md); enhanceBrief(); }  // AI 종합 브리핑
   else if(!md) brief.innerHTML='<p class="meta" style="margin-top:8px">이 날짜의 AI 종합 브리핑은 없습니다. 위 핵심 키워드를 참고하세요.</p>';
   else brief.innerHTML='';   // 자동추출 키워드 마크다운은 위 보드로 대체(중복 제거)
 }
