@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from insights import is_single_stock
+from insights import is_single_stock, rank_keywords
 
 ROOT = Path(__file__).resolve().parent
 BRIEFINGS = ROOT / "briefings"
@@ -96,23 +96,49 @@ def local_feeds() -> dict[str, list]:
     return feeds
 
 
+def local_keywords() -> dict[str, dict]:
+    """raw_*.json 에서 '여러 채널이 함께 다룬 반복 키워드 = 그날의 핵심'을 구조화해 뽑는다.
+
+    대시보드가 이 구조를 카드/칩으로 시각화한다(가독성·대표성). rank_keywords 재사용 —
+    랭킹 로직은 insights.py 한 곳에만 둔다."""
+    out: dict[str, dict] = {}
+    for p in sorted(BRIEFINGS.glob("raw_*.json")):
+        m = re.match(r"raw_(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\.json", p.name)
+        if not m:
+            continue
+        try:
+            items = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        out[m.group(1)] = {
+            "kws": rank_keywords(items, top=18),
+            "n_noise": sum(1 for it in items if is_single_stock(it)),
+            "n_items": len(items),
+        }
+    return out
+
+
 def prior_payload(password: str) -> dict:
+    empty = {"briefings": {}, "feeds": {}, "keywords": {}}
     idx = DOCS / "index.html"
     if not idx.exists():
-        return {"briefings": {}, "feeds": {}}
+        return dict(empty)
     m = re.search(r'id="payload" type="application/json">(.*?)</script>', idx.read_text(encoding="utf-8"), re.S)
     if not m:
-        return {"briefings": {}, "feeds": {}}
+        return dict(empty)
     try:
         data = json.loads(decrypt(json.loads(m.group(1)), password))
         b = data.get("briefings", {})
         if isinstance(b, list):  # 구버전 포맷(list) 호환
             b = {x["date"]: x["markdown"] for x in b if isinstance(x, dict) and "date" in x}
         f = data.get("feeds", {})
-        return {"briefings": b if isinstance(b, dict) else {}, "feeds": f if isinstance(f, dict) else {}}
+        k = data.get("keywords", {})
+        return {"briefings": b if isinstance(b, dict) else {},
+                "feeds": f if isinstance(f, dict) else {},
+                "keywords": k if isinstance(k, dict) else {}}
     except Exception:
         print("경고: 기존 사이트 복호화 실패(비번 변경?) — 과거분 없이 새로 시작")
-        return {"briefings": {}, "feeds": {}}
+        return dict(empty)
 
 
 HTML = r"""<!doctype html>
@@ -156,6 +182,32 @@ HTML = r"""<!doctype html>
   .md code{background:#eef1f6;padding:1px 6px;border-radius:5px;font-size:13px;}
   .md a{word-break:break-all;}
   .md hr{border:0;border-top:1px solid var(--line);margin:22px 0;}
+
+  /* 오늘의 핵심 키워드 보드 — 여러 채널이 함께 다룬 반복 이슈 */
+  .core{margin:0 0 26px;}
+  .core .lead{font-size:18px;font-weight:800;color:#111827;margin:0 0 3px;letter-spacing:-.01em;}
+  .core .lead .q{font-weight:600;color:var(--muted);font-size:13px;}
+  .core .sub{color:var(--muted);font-size:12.5px;line-height:1.55;margin:0 0 15px;}
+  .kgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
+  .kcard{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 14px;
+    cursor:pointer;position:relative;transition:box-shadow .12s,transform .12s,border-color .12s;}
+  .kcard:hover{box-shadow:0 5px 16px rgba(16,24,40,.10);transform:translateY(-1px);border-color:#cbd5e8;}
+  .kcard .kw{font-size:16px;font-weight:800;color:#111827;display:flex;align-items:center;gap:6px;
+    padding-right:62px;line-height:1.25;}
+  .kcard .kw .g{font-size:12px;}
+  .kbadge{position:absolute;top:12px;right:12px;font-size:11px;font-weight:800;
+    background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:3px 9px;white-space:nowrap;}
+  .kcard .kh{color:#5b6472;font-size:12.5px;line-height:1.45;margin-top:6px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .khits{color:#9aa3b0;font-size:11.5px;margin-top:9px;}
+  .kmore{color:var(--muted);font-size:12.5px;font-weight:700;margin:18px 0 9px;}
+  .kchips{display:flex;flex-wrap:wrap;gap:7px;}
+  .kchip{background:var(--chip);color:#374151;border:1px solid var(--line);border-radius:999px;
+    padding:5px 11px;font-size:12.5px;cursor:pointer;white-space:nowrap;}
+  .kchip:hover{background:#e2e7ef;} .kchip b{color:var(--accent);font-weight:800;}
+  .core .empty{color:var(--muted);font-size:13.5px;background:var(--card);border:1px dashed var(--line);
+    border-radius:12px;padding:16px;}
+  .core .divider{border:0;border-top:1px solid var(--line);margin:26px 0 4px;}
 
   /* 피드 */
   .feedbar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
@@ -220,6 +272,7 @@ HTML = r"""<!doctype html>
     <button class="tab" id="logout" title="이 기기에서 비밀번호 기억 지우기">로그아웃</button>
   </header>
   <div class="wrap">
+    <div id="coreboard"></div>
     <div id="brief" class="md"></div>
     <div id="feed" class="hidden">
       <div class="feedbar">
@@ -253,9 +306,39 @@ function dates(){ return Object.keys(DATA.briefings||{}).concat(Object.keys(DATA
   .filter((v,i,a)=>a.indexOf(v)===i).sort().reverse(); }
 function label(k){ const m=(k||'').match(/^(\d{4}-\d{2}-\d{2})_(\d{2})$/); return m?`${m[1]} ${m[2]}시`:k; }
 
+function renderCore(){
+  const el=document.getElementById('coreboard');
+  const kd=(DATA.keywords||{})[CUR];
+  const kws=(kd&&kd.kws)||[];
+  if(!kws.length){ el.innerHTML=''; return; }
+  const rep=kws.filter(k=>k.channels>=2);
+  const single=kws.filter(k=>k.channels<2);
+  const kcard=k=>`<div class="kcard" data-kw="${esc(k.kw)}">
+      <span class="kbadge">${k.channels}개 채널</span>
+      <div class="kw">${k.macro?'<span class="g">🌐</span>':''}${esc(k.kw)}</div>
+      ${k.head?`<div class="kh">${esc(k.head)}</div>`:''}
+      <div class="khits">${k.hits}건 언급</div></div>`;
+  const kchip=k=>`<span class="kchip" data-kw="${esc(k.kw)}">${esc(k.kw)} <b>${k.channels}·${k.hits}</b></span>`;
+  let h=`<div class="lead">🔑 오늘의 핵심 <span class="q">— 여러 채널이 함께 다룬 이슈</span></div>
+    <div class="sub">여러 채널이 동시에 다룰수록 그날의 대표 이슈입니다. 개별 소형주 ${(kd.n_noise||0)}건 집계 제외 · 수집 ${(kd.n_items||0)}건. 카드를 누르면 전체 피드에서 관련 뉴스만 볼 수 있어요.</div>`;
+  h += rep.length ? `<div class="kgrid">${rep.map(kcard).join('')}</div>`
+                  : `<div class="empty">여러 채널이 겹친 반복 이슈가 없습니다 — 아래 주목 키워드를 참고하세요.</div>`;
+  if(single.length) h+=`<div class="kmore">그 외 주목 키워드</div><div class="kchips">${single.map(kchip).join('')}</div>`;
+  el.innerHTML=`<div class="core">${h}<hr class="divider"></div>`;
+  el.querySelectorAll('[data-kw]').forEach(n=>n.onclick=()=>kfilter(n.dataset.kw));
+}
+function kfilter(kw){   // 키워드 클릭 → 전체 피드에서 그 키워드로 필터(드릴다운)
+  document.getElementById('chSel').value='';
+  document.getElementById('ssToggle').checked=false;
+  document.getElementById('q').value=kw;
+  setView('feed');
+}
 function renderBrief(){
-  const md=(DATA.briefings||{})[CUR]||'_이 날짜의 브리핑이 아직 없습니다. (생성 단계는 크레딧 필요)_';
-  document.getElementById('brief').innerHTML=marked.parse(md);
+  renderCore();
+  const md=(DATA.briefings||{})[CUR], brief=document.getElementById('brief');
+  if(md && md.indexOf('자동 추출 요약')<0) brief.innerHTML=marked.parse(md);      // AI 종합 브리핑
+  else if(!md) brief.innerHTML='<p class="meta" style="margin-top:8px">이 날짜의 AI 종합 브리핑은 없습니다. 위 핵심 키워드를 참고하세요.</p>';
+  else brief.innerHTML='';   // 자동추출 키워드 마크다운은 위 보드로 대체(중복 제거)
 }
 function renderFeed(){
   const feed=(DATA.feeds||{})[CUR]||[];
@@ -299,6 +382,7 @@ function render(){ VIEW==='brief'?renderBrief():renderFeed(); }
 
 function setView(v){ VIEW=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===v));
+  document.getElementById('coreboard').classList.toggle('hidden',v!=='brief');
   document.getElementById('brief').classList.toggle('hidden',v!=='brief');
   document.getElementById('feed').classList.toggle('hidden',v!=='feed');
   render();
@@ -339,10 +423,11 @@ def main() -> None:
     prior = prior_payload(password)
     briefings = dict(prior["briefings"]); briefings.update(local_briefings())
     feeds = dict(prior["feeds"]); feeds.update(local_feeds())
+    keywords = dict(prior["keywords"]); keywords.update(local_keywords())
 
     plain = json.dumps(
         {"meta": {"built_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")},
-         "briefings": briefings, "feeds": feeds},
+         "briefings": briefings, "feeds": feeds, "keywords": keywords},
         ensure_ascii=False,
     )
     DOCS.mkdir(exist_ok=True)
