@@ -34,7 +34,13 @@ def load_config() -> dict:
     cfg.setdefault("max_messages_per_channel", 200)
     cfg.setdefault("slots", DEFAULT_SLOTS)
     cfg.setdefault("exclude_patterns", [])
+    cfg.setdefault("watch_terms", [])
     return cfg
+
+
+def watch_terms(cfg: dict | None = None) -> list[str]:
+    cfg = cfg or load_config()
+    return cfg.get("watch_terms") or []
 
 
 def slots(cfg: dict | None = None) -> list[dict]:

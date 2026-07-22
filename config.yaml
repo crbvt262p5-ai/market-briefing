@@ -62,3 +62,17 @@ max_messages_per_channel: 200
 
 # 텔레그램 메시지 하단에 넣을 대시보드 주소
 dashboard_url: "https://crbvt262p5-ai.github.io/market-briefing/"
+
+# 대시보드 '핵심 브리핑' 하단 '특수 관심 키워드' 섹션. 이 키워드가 언급된 그날
+# 뉴스·리포트만 모아서 원문 링크와 함께 보여줌(무료, AI 미사용). 자유롭게 추가/삭제.
+watch_terms:
+  - "광물"
+  - "배터리"
+  - "이차전지"
+  - "반도체"
+  - "ESS"
+  - "에너지"
+  - "EV"
+  - "BEV"
+  - "전기차"
+  - "리튬"

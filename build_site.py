@@ -20,7 +20,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from insights import is_single_stock, rank_keywords
+import config
+from insights import is_single_stock, match_watchlist, rank_keywords
 
 ROOT = Path(__file__).resolve().parent
 BRIEFINGS = ROOT / "briefings"
@@ -57,8 +58,32 @@ def local_briefings() -> dict[str, str]:
     return out
 
 
-def local_feeds() -> dict[str, list]:
-    feeds: dict[str, list] = {}
+def _feed_row(it: dict) -> dict:
+    head = next((ln for ln in (it.get("text", "") or "").splitlines() if ln.strip()), "")
+    arts = []
+    for a in it.get("articles", []):
+        if a.get("text") or a.get("kind") == "pdf":
+            arts.append(
+                {
+                    "title": a.get("title"),
+                    "text": (a.get("text") or "")[:1200],
+                    "url": a.get("final_url") or a.get("url"),
+                    "kind": a.get("kind"),
+                }
+            )
+    return {
+        "ch": it.get("channel"),
+        "ts": it.get("timestamp"),
+        "head": head[:240],
+        "tlink": it.get("link"),
+        "summary": it.get("summary"),
+        "arts": arts,
+        "ss": 1 if is_single_stock(it) else 0,  # 개별 소형주 노이즈(기본 숨김)
+    }
+
+
+def _dated_raw_items():
+    """raw_*.json 을 (날짜/슬롯 키, items) 쌍으로 yield — 파싱 실패는 건너뜀."""
     for p in sorted(BRIEFINGS.glob("raw_*.json")):
         m = re.match(r"raw_(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\.json", p.name)
         if not m:
@@ -67,33 +92,11 @@ def local_feeds() -> dict[str, list]:
             items = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             continue
-        feed = []
-        for it in items:
-            head = next((ln for ln in (it.get("text", "") or "").splitlines() if ln.strip()), "")
-            arts = []
-            for a in it.get("articles", []):
-                if a.get("text") or a.get("kind") == "pdf":
-                    arts.append(
-                        {
-                            "title": a.get("title"),
-                            "text": (a.get("text") or "")[:1200],
-                            "url": a.get("final_url") or a.get("url"),
-                            "kind": a.get("kind"),
-                        }
-                    )
-            feed.append(
-                {
-                    "ch": it.get("channel"),
-                    "ts": it.get("timestamp"),
-                    "head": head[:240],
-                    "tlink": it.get("link"),
-                    "summary": it.get("summary"),
-                    "arts": arts,
-                    "ss": 1 if is_single_stock(it) else 0,  # 개별 소형주 노이즈(기본 숨김)
-                }
-            )
-        feeds[m.group(1)] = feed
-    return feeds
+        yield m.group(1), items
+
+
+def local_feeds() -> dict[str, list]:
+    return {key: [_feed_row(it) for it in items] for key, items in _dated_raw_items()}
 
 
 def local_keywords() -> dict[str, dict]:
@@ -102,15 +105,8 @@ def local_keywords() -> dict[str, dict]:
     대시보드가 이 구조를 카드/칩으로 시각화한다(가독성·대표성). rank_keywords 재사용 —
     랭킹 로직은 insights.py 한 곳에만 둔다."""
     out: dict[str, dict] = {}
-    for p in sorted(BRIEFINGS.glob("raw_*.json")):
-        m = re.match(r"raw_(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\.json", p.name)
-        if not m:
-            continue
-        try:
-            items = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        out[m.group(1)] = {
+    for key, items in _dated_raw_items():
+        out[key] = {
             "kws": rank_keywords(items, top=18),
             "n_noise": sum(1 for it in items if is_single_stock(it)),
             "n_items": len(items),
@@ -118,8 +114,22 @@ def local_keywords() -> dict[str, dict]:
     return out
 
 
+def local_watchlist() -> dict[str, dict]:
+    """raw_*.json 에서 config.yaml 의 watch_terms(배터리/리튬/EV 등 지정 키워드)가
+    언급된 항목만 날짜별·키워드별로 모은다. 히트 없는 날짜/키워드는 생략(무료, AI 미사용)."""
+    terms = config.watch_terms()
+    if not terms:
+        return {}
+    out: dict[str, dict] = {}
+    for key, items in _dated_raw_items():
+        matched = match_watchlist(items, terms)
+        if matched:
+            out[key] = {t: [_feed_row(it) for it in its] for t, its in matched.items()}
+    return out
+
+
 def prior_payload(password: str) -> dict:
-    empty = {"briefings": {}, "feeds": {}, "keywords": {}}
+    empty = {"briefings": {}, "feeds": {}, "keywords": {}, "watchlist": {}}
     idx = DOCS / "index.html"
     if not idx.exists():
         return dict(empty)
@@ -133,9 +143,11 @@ def prior_payload(password: str) -> dict:
             b = {x["date"]: x["markdown"] for x in b if isinstance(x, dict) and "date" in x}
         f = data.get("feeds", {})
         k = data.get("keywords", {})
+        w = data.get("watchlist", {})
         return {"briefings": b if isinstance(b, dict) else {},
                 "feeds": f if isinstance(f, dict) else {},
-                "keywords": k if isinstance(k, dict) else {}}
+                "keywords": k if isinstance(k, dict) else {},
+                "watchlist": w if isinstance(w, dict) else {}}
     except Exception:
         print("경고: 기존 사이트 복호화 실패(비번 변경?) — 과거분 없이 새로 시작")
         return dict(empty)
@@ -220,6 +232,13 @@ HTML = r"""<!doctype html>
     border-radius:12px;padding:16px;}
   .core .divider{border:0;border-top:1px solid var(--line);margin:26px 0 4px;}
 
+  /* 특수 관심 키워드(배터리/리튬/EV 등 지정어) — 언급된 뉴스만 카드로, 페이지 하단 */
+  .wsec{margin:20px 0 6px;}
+  .wsec-h{font-size:14.5px;font-weight:800;color:#111827;margin:0 0 9px;display:flex;align-items:center;gap:8px;}
+  .wcount{font-size:11.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);
+    border-radius:999px;padding:2px 9px;}
+  .wmiss{color:var(--muted);font-size:12px;margin-top:14px;}
+
   /* 피드 */
   .feedbar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
   .feedbar input[type=text],.feedbar input#q{flex:1;min-width:160px;}
@@ -285,6 +304,7 @@ HTML = r"""<!doctype html>
   <div class="wrap">
     <div id="coreboard"></div>
     <div id="brief" class="md"></div>
+    <div id="watchboard"></div>
     <div id="feed" class="hidden">
       <div class="feedbar">
         <select id="chSel"></select>
@@ -379,6 +399,25 @@ function renderBrief(){
   if(md && md.indexOf('자동 추출 요약')<0){ brief.innerHTML=marked.parse(md); enhanceBrief(); }  // AI 종합 브리핑
   else if(!md) brief.innerHTML='<p class="meta" style="margin-top:8px">이 날짜의 AI 종합 브리핑은 없습니다. 위 핵심 키워드를 참고하세요.</p>';
   else brief.innerHTML='';   // 자동추출 키워드 마크다운은 위 보드로 대체(중복 제거)
+  renderWatch();
+}
+function renderWatch(){   // 배터리/리튬/EV 등 지정 관심 키워드 — 언급된 뉴스만 카드로(페이지 하단)
+  const el=document.getElementById('watchboard');
+  const terms=(DATA.meta&&DATA.meta.watch_terms)||[];
+  if(!terms.length){ el.innerHTML=''; return; }
+  const wd=(DATA.watchlist||{})[CUR]||{};
+  const hit=terms.filter(t=>wd[t]&&wd[t].length);
+  const miss=terms.filter(t=>!hit.includes(t));
+  let h=`<div class="lead">🔎 특수 관심 키워드</div>
+    <div class="sub">배터리·소재·전기차 등 지정 키워드가 언급된 그날 뉴스·리포트만 모았습니다.</div>`;
+  if(!hit.length){
+    h+=`<div class="empty">오늘은 지정 키워드 언급이 없습니다.</div>`;
+  } else {
+    h+=hit.map(t=>`<div class="wsec"><div class="wsec-h">${esc(t)} <span class="wcount">${wd[t].length}건</span></div>
+      ${wd[t].slice(0,6).map(card).join('')}</div>`).join('');
+    if(miss.length) h+=`<div class="wmiss">오늘 언급 없음: ${esc(miss.join(', '))}</div>`;
+  }
+  el.innerHTML=`<div class="core">${h}</div>`;
 }
 function renderFeed(){
   const feed=(DATA.feeds||{})[CUR]||[];
@@ -424,6 +463,7 @@ function setView(v){ VIEW=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===v));
   document.getElementById('coreboard').classList.toggle('hidden',v!=='brief');
   document.getElementById('brief').classList.toggle('hidden',v!=='brief');
+  document.getElementById('watchboard').classList.toggle('hidden',v!=='brief');
   document.getElementById('feed').classList.toggle('hidden',v!=='feed');
   render();
 }
@@ -464,10 +504,12 @@ def main() -> None:
     briefings = dict(prior["briefings"]); briefings.update(local_briefings())
     feeds = dict(prior["feeds"]); feeds.update(local_feeds())
     keywords = dict(prior["keywords"]); keywords.update(local_keywords())
+    watchlist = dict(prior["watchlist"]); watchlist.update(local_watchlist())
 
     plain = json.dumps(
-        {"meta": {"built_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")},
-         "briefings": briefings, "feeds": feeds, "keywords": keywords},
+        {"meta": {"built_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                  "watch_terms": config.watch_terms()},
+         "briefings": briefings, "feeds": feeds, "keywords": keywords, "watchlist": watchlist},
         ensure_ascii=False,
     )
     DOCS.mkdir(exist_ok=True)

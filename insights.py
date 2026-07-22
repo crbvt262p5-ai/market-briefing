@@ -164,6 +164,31 @@ def rank_keywords(items: list[dict], top: int = 8) -> list[dict]:
     ]
 
 
+def _watch_pattern(term: str) -> re.Pattern:
+    # 영문 약어(EV/ESS/BEV 등)는 단어 경계로(REVENUE 같은 단어에 오탐 방지),
+    # 한글은 부분일치(조사 결합 "배터리를"에도 매칭).
+    if re.fullmatch(r"[A-Za-z]+", term):
+        return re.compile(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", re.IGNORECASE)
+    return re.compile(re.escape(term))
+
+
+def match_watchlist(items: list[dict], terms: list[str]) -> dict[str, list[dict]]:
+    """items 중 사용자 지정 관심 키워드(배터리/리튬/EV 등)가 헤드라인·요약·본문에
+    등장하는 항목만 키워드별로 모은다. 히트 0건인 키워드는 결과에서 제외."""
+    pats = {t: _watch_pattern(t) for t in terms}
+    out: dict[str, list[dict]] = {t: [] for t in terms}
+    for it in items:
+        blob = " ".join([
+            it.get("text", "") or "",
+            it.get("summary", "") or "",
+            " ".join((a.get("text") or "") for a in it.get("articles", [])),
+        ])
+        for t, pat in pats.items():
+            if pat.search(blob):
+                out[t].append(it)
+    return {t: v for t, v in out.items() if v}
+
+
 def build_core_markdown(items: list[dict], label: str, top: int = 14) -> str:
     """AI 브리핑이 없을 때 핵심 브리핑을 대신할 마크다운(자동 추출).
 
