@@ -189,6 +189,21 @@ def match_watchlist(items: list[dict], terms: list[str]) -> dict[str, list[dict]
     return {t: v for t, v in out.items() if v}
 
 
+def keyword_member_indices(items: list[dict], kws: set[str]) -> dict[str, list[int]]:
+    """rank_keywords와 **동일한 판정 기준**(매크로 동의어 정규화 + 신흥 토큰, 텍스트 범위도 동일)으로
+    지정된 kws 각각에 실제로 매칭된 items의 인덱스를 모은다 — 대시보드 드릴다운(카드 클릭)이
+    막연한 문자열 검색 대신 랭킹을 만든 바로 그 근거로 필터링하도록 하기 위함. 예: 'AI' 키워드는
+    본문에 'AI 추천'처럼 단어만 우연히 섞인 글이 아니라, 랭킹 집계에 실제로 기여한 글만 나온다."""
+    out: dict[str, list[int]] = {}
+    for i, it in enumerate(items):
+        if is_single_stock(it):
+            continue
+        found = (_generic_tokens(it.get("text", "") or "") | macro_themes(it.get("text", "") or "")) & kws
+        for kw in found:
+            out.setdefault(kw, []).append(i)
+    return out
+
+
 def build_core_markdown(items: list[dict], label: str, top: int = 14) -> str:
     """AI 브리핑이 없을 때 핵심 브리핑을 대신할 마크다운(자동 추출).
 

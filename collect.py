@@ -15,6 +15,20 @@ from fetch import extract_urls, fetch_many
 
 _LETTER_RE = re.compile(r"[가-힣A-Za-z]")
 _URL_RE = re.compile(r"https?://\S+")
+# 와이어서비스 저작권 고지(예: "<저작권자 (c) 연합인포맥스, ... AI 학습 및 활용 금지>",
+# "＜ⓒ종합 경제정보 미디어 이데일리 - 무단전재 & 재배포 금지＞"). 기사 내용과 무관한데도
+# "AI" 같은 단어가 섞여 있어 저장 그대로 두면 키워드 집계(핵심 보드)를 오염시킨다.
+_COPYRIGHT_RE = re.compile(r"[<＜][^<>＜＞]{0,120}(?:저작권|무단전재|재배포)[^<>＜＞]{0,120}[>＞]")
+# "본 보고서는 AI가 생성한 참고 자료로..." — 자동생성 리포트 고지 블록(항상 메시지 꼬리에 위치,
+# 그 뒤로 데이터투자/이데일리 면책조항·저작권 고지가 이어짐). "AI"라는 단어 때문에 실제로는
+# AI와 무관한 리포트까지 'AI' 키워드로 집계되는 대표 오탐 사례.
+_AI_DISCLAIMER_RE = re.compile(r"※\s*본\s*보고서는\s*AI가\s*생성한.*", re.DOTALL)
+
+
+def _strip_boilerplate(text: str) -> str:
+    text = _AI_DISCLAIMER_RE.sub(" ", text)
+    text = _COPYRIGHT_RE.sub(" ", text)
+    return text.strip()
 
 
 def _is_noise(text: str, patterns: list[str]) -> bool:
@@ -55,7 +69,7 @@ async def _collect_channel(client: TelegramClient, channel, cutoff_utc, tz, limi
     async for msg in client.iter_messages(entity, limit=limit):
         if msg.date < cutoff_utc:
             break
-        text = (msg.message or "").strip()
+        text = _strip_boilerplate((msg.message or "").strip())
         if not text:
             continue  # 텍스트 없는 미디어/서비스 메시지는 건너뜀
         if _is_noise(text, exclude):

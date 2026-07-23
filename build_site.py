@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 import config
-from insights import is_single_stock, match_watchlist, rank_keywords
+from insights import is_single_stock, keyword_member_indices, match_watchlist, rank_keywords
 
 ROOT = Path(__file__).resolve().parent
 BRIEFINGS = ROOT / "briefings"
@@ -106,10 +106,14 @@ def local_keywords() -> dict[str, dict]:
     랭킹 로직은 insights.py 한 곳에만 둔다."""
     out: dict[str, dict] = {}
     for key, items in _dated_raw_items():
+        kws = rank_keywords(items, top=18)
         out[key] = {
-            "kws": rank_keywords(items, top=18),
+            "kws": kws,
             "n_noise": sum(1 for it in items if is_single_stock(it)),
             "n_items": len(items),
+            # 카드 클릭 드릴다운이 랭킹을 만든 근거(헤드라인 텍스트)로만 필터하도록 —
+            # 스크랩된 기사 본문의 사이트 위젯 잡음("AI 추천 뉴스" 등)에 낚이지 않게.
+            "idx": keyword_member_indices(items, {k["kw"] for k in kws}),
         }
     return out
 
@@ -246,6 +250,9 @@ HTML = r"""<!doctype html>
     white-space:nowrap;user-select:none;cursor:pointer;}
   .ssbadge{font-size:11px;color:#b45309;background:#fef3c7;border-radius:6px;padding:2px 7px;margin-left:6px;}
   .meta{color:var(--muted);font-size:13px;margin:2px 0 14px;}
+  .kfilter-chip{display:inline-block;background:var(--accent-soft);color:var(--accent);font-weight:700;
+    border-radius:999px;padding:3px 10px;margin-right:8px;}
+  .kfilter-chip b{cursor:pointer;font-weight:700;margin-left:2px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 17px;
     margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);}
   .card .top{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:7px;}
@@ -365,12 +372,17 @@ function renderCore(){
   el.innerHTML=`<div class="core">${h}<hr class="divider"></div>`;
   el.querySelectorAll('[data-kw]').forEach(n=>n.onclick=()=>kfilter(n.dataset.kw));
 }
-function kfilter(kw){   // 키워드 클릭 → 전체 피드에서 그 키워드로 필터(드릴다운)
+let KFILTER_IDX=null, KFILTER_LABEL=null;   // 키워드 카드 클릭 드릴다운 — 랭킹 근거(헤드라인)로만 정확히 필터
+function kfilter(kw){
+  const kd=(DATA.keywords||{})[CUR]||{};
+  KFILTER_IDX=(kd.idx&&kd.idx[kw])||[];
+  KFILTER_LABEL=kw;
   document.getElementById('chSel').value='';
   document.getElementById('ssToggle').checked=false;
-  document.getElementById('q').value=kw;
+  document.getElementById('q').value='';
   setView('feed');
 }
+function clearKfilter(){ KFILTER_IDX=null; KFILTER_LABEL=null; render(); }
 function enhanceBrief(){   // 핵심 3줄/오늘 꼭 볼 것 불릿 → 수치 배지+방향 컬러 카드로 강조
   const brief=document.getElementById('brief');
   brief.querySelectorAll('h2, h3').forEach(h=>{
@@ -430,12 +442,15 @@ function renderFeed(){
   }
   const ch=chSel.value, q=document.getElementById('q').value.trim().toLowerCase();
   const showSS=document.getElementById('ssToggle').checked;
-  let rows=feed.slice().reverse();
+  let rows=feed;
+  if(KFILTER_IDX) rows=rows.filter((_,i)=>KFILTER_IDX.includes(i));   // 인덱스 순서 유지한 채로 먼저 적용
+  rows=rows.slice().reverse();
   if(ch) rows=rows.filter(r=>r.ch===ch);
   if(q) rows=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(q));
   const nSS=rows.filter(r=>r.ss).length;
   if(!showSS) rows=rows.filter(r=>!r.ss);
-  document.getElementById('feedMeta').textContent =
+  const kchip=KFILTER_IDX?`<span class="kfilter-chip">🔑 ${esc(KFILTER_LABEL)} 매칭 <b onclick="clearKfilter()">해제 ✕</b></span>`:'';
+  document.getElementById('feedMeta').innerHTML = kchip +
     `${rows.length}건` + (!showSS && nSS ? ` · 개별 소형주 ${nSS}건 숨김` : '');
   document.getElementById('cards').innerHTML=rows.map(card).join('') ||
     '<div class="meta">표시할 항목이 없습니다.</div>';
@@ -475,8 +490,8 @@ async function unlock(){
   document.getElementById('app').classList.remove('hidden');
   const sel=document.getElementById('dateSel');
   const ds=dates(); sel.innerHTML=ds.map(d=>`<option value="${d}">${label(d)}</option>`).join('');
-  CUR=ds[0]; sel.onchange=()=>{CUR=sel.value;render();};
-  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setView(t.dataset.view));
+  CUR=ds[0]; sel.onchange=()=>{CUR=sel.value;KFILTER_IDX=null;KFILTER_LABEL=null;render();};
+  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{KFILTER_IDX=null;KFILTER_LABEL=null;setView(t.dataset.view);});
   document.getElementById('chSel').onchange=renderFeed;
   document.getElementById('q').oninput=renderFeed;
   document.getElementById('ssToggle').onchange=renderFeed;
