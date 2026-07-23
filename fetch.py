@@ -18,6 +18,24 @@ UA = (
 # 본문이 아닌 링크(텔레그램 내부, 이미지 등)는 추출 대상에서 제외
 SKIP_HOST = ("t.me", "telegram.me")
 
+# 스크랩된 페이지에서 실제 본문이 아니라 사이트 위젯/저작권 고지/렌더 실패 잔재가 섞이는
+# 사례들. 그대로 두면 기사 내용과 무관한 텍스트(예: "AI 추천 뉴스")가 검색·키워드 매칭·
+# AI 요약 입력에 노이즈로 들어간다.
+_AI_WIDGET_RE = re.compile(r"^\s*AI\s*추천\s*뉴스\s*")  # 사이트 사이드바 위젯 라벨(선두)
+_COPYRIGHT_RE = re.compile(r"[<＜][^<>＜＞]{0,120}(?:저작권|무단전재|재배포)[^<>＜＞]{0,120}[>＞]")
+# 아래는 "본문"이 사실상 통째로 렌더 실패 잔재인 경우 — 부분 제거가 아니라 추출 실패로 취급.
+_EMPTY_SHELLS = ("loading…", "loading...", "please enable js")
+
+
+def _clean_article_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    text = _COPYRIGHT_RE.sub(" ", _AI_WIDGET_RE.sub("", text)).strip()
+    low = text.lower()
+    if not text or low.startswith(_EMPTY_SHELLS) or text.startswith("About\nPress\nCopyright"):
+        return None  # JS 미렌더 껍데기/유튜브 페이지 chrome 등 — 실제 본문 없음
+    return text
+
 
 def extract_urls(text: str) -> list[str]:
     urls = []
@@ -53,8 +71,8 @@ def fetch_article(url: str, timeout: int = 12, max_chars: int = 4000) -> dict:
         text = trafilatura.extract(
             r.text, include_comments=False, include_tables=False, favor_recall=True, url=r.url
         )
+        text = _clean_article_text(text)
         if text:
-            text = text.strip()
             out["text"] = (text[:max_chars] + "…") if len(text) > max_chars else text
     except Exception as e:  # noqa: BLE001
         out["error"] = str(e)[:120]
