@@ -30,6 +30,7 @@ SYN = {
     "삼성전자": "삼성전자", "삼전": "삼성전자",
     "브로드컴": "브로드컴", "broadcom": "브로드컴", "avgo": "브로드컴",
     "amd": "AMD", "테슬라": "테슬라", "tesla": "테슬라", "애플": "애플", "apple": "애플",
+    "구글": "구글", "알파벳": "구글", "google": "구글", "alphabet": "구글", "googl": "구글",
     "코스피": "코스피", "kospi": "코스피", "코스닥": "코스피",
     "나스닥": "미국증시", "s&p": "미국증시", "다우": "미국증시", "sox": "미국증시",
     "금값": "금", "골드": "금", "gold": "금",
@@ -172,12 +173,13 @@ def _watch_pattern(term: str) -> re.Pattern:
     return re.compile(re.escape(term))
 
 
-def match_watchlist(items: list[dict], terms: list[str]) -> dict[str, list[dict]]:
+def match_watchlist(items: list[dict], terms: list[str]) -> dict[str, list[int]]:
     """items 중 사용자 지정 관심 키워드(배터리/리튬/EV 등)가 헤드라인·요약·본문에
-    등장하는 항목만 키워드별로 모은다. 히트 0건인 키워드는 결과에서 제외."""
+    등장하는 항목의 **인덱스**를 키워드별로 모은다(대시보드 드릴다운용).
+    히트 0건인 키워드는 결과에서 제외."""
     pats = {t: _watch_pattern(t) for t in terms}
-    out: dict[str, list[dict]] = {t: [] for t in terms}
-    for it in items:
+    out: dict[str, list[int]] = {t: [] for t in terms}
+    for i, it in enumerate(items):
         blob = " ".join([
             it.get("text", "") or "",
             it.get("summary", "") or "",
@@ -185,7 +187,7 @@ def match_watchlist(items: list[dict], terms: list[str]) -> dict[str, list[dict]
         ])
         for t, pat in pats.items():
             if pat.search(blob):
-                out[t].append(it)
+                out[t].append(i)
     return {t: v for t, v in out.items() if v}
 
 

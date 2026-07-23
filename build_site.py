@@ -120,7 +120,8 @@ def local_keywords() -> dict[str, dict]:
 
 def local_watchlist() -> dict[str, dict]:
     """raw_*.json 에서 config.yaml 의 watch_terms(배터리/리튬/EV 등 지정 키워드)가
-    언급된 항목만 날짜별·키워드별로 모은다. 히트 없는 날짜/키워드는 생략(무료, AI 미사용)."""
+    언급된 항목의 **인덱스**를 날짜별·키워드별로 모은다(feeds[date]와 같은 순서 —
+    카드를 따로 안 실어 대시보드가 클릭 시 정확히 드릴다운하게). 히트 없는 날짜/키워드는 생략."""
     terms = config.watch_terms()
     if not terms:
         return {}
@@ -128,7 +129,7 @@ def local_watchlist() -> dict[str, dict]:
     for key, items in _dated_raw_items():
         matched = match_watchlist(items, terms)
         if matched:
-            out[key] = {t: [_feed_row(it) for it in its] for t, its in matched.items()}
+            out[key] = matched
     return out
 
 
@@ -236,11 +237,7 @@ HTML = r"""<!doctype html>
     border-radius:12px;padding:16px;}
   .core .divider{border:0;border-top:1px solid var(--line);margin:26px 0 4px;}
 
-  /* 특수 관심 키워드(배터리/리튬/EV 등 지정어) — 언급된 뉴스만 카드로, 페이지 하단 */
-  .wsec{margin:20px 0 6px;}
-  .wsec-h{font-size:14.5px;font-weight:800;color:#111827;margin:0 0 9px;display:flex;align-items:center;gap:8px;}
-  .wcount{font-size:11.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);
-    border-radius:999px;padding:2px 9px;}
+  /* 특수 관심 키워드(배터리/리튬/EV 등 지정어) — 페이지 하단, 칩+건수만(.kchip 재사용) */
   .wmiss{color:var(--muted);font-size:12px;margin-top:14px;}
 
   /* 피드 */
@@ -372,15 +369,22 @@ function renderCore(){
   el.innerHTML=`<div class="core">${h}<hr class="divider"></div>`;
   el.querySelectorAll('[data-kw]').forEach(n=>n.onclick=()=>kfilter(n.dataset.kw));
 }
-let KFILTER_IDX=null, KFILTER_LABEL=null;   // 키워드 카드 클릭 드릴다운 — 랭킹 근거(헤드라인)로만 정확히 필터
-function kfilter(kw){
-  const kd=(DATA.keywords||{})[CUR]||{};
-  KFILTER_IDX=(kd.idx&&kd.idx[kw])||[];
-  KFILTER_LABEL=kw;
+let KFILTER_IDX=null, KFILTER_LABEL=null;   // 키워드/관심어 클릭 드릴다운 — 정확한 인덱스로만 필터
+function applyFilter(idxArr, label){
+  KFILTER_IDX=idxArr||[];
+  KFILTER_LABEL=label;
   document.getElementById('chSel').value='';
-  document.getElementById('ssToggle').checked=false;
+  document.getElementById('ssToggle').checked=true;   // 정확 매칭이니 소형주 숨김으로 결과가 사라지지 않게
   document.getElementById('q').value='';
   setView('feed');
+}
+function kfilter(kw){   // '오늘의 핵심' 막대 — 랭킹을 만든 근거(헤드라인)로 정확히 필터
+  const kd=(DATA.keywords||{})[CUR]||{};
+  applyFilter((kd.idx&&kd.idx[kw])||[], kw);
+}
+function wfilter(term){   // '특수 관심 키워드' 칩 — 지정어 매칭 인덱스로 필터
+  const wd=(DATA.watchlist||{})[CUR]||{};
+  applyFilter(wd[term]||[], term);
 }
 function clearKfilter(){ KFILTER_IDX=null; KFILTER_LABEL=null; render(); }
 function enhanceBrief(){   // 핵심 3줄/오늘 꼭 볼 것 불릿 → 수치 배지+방향 컬러 카드로 강조
@@ -413,7 +417,7 @@ function renderBrief(){
   else brief.innerHTML='';   // 자동추출 키워드 마크다운은 위 보드로 대체(중복 제거)
   renderWatch();
 }
-function renderWatch(){   // 배터리/리튬/EV 등 지정 관심 키워드 — 언급된 뉴스만 카드로(페이지 하단)
+function renderWatch(){   // 배터리/리튬/EV 등 지정 관심 키워드 — 칩만 표시, 누르면 전체피드로 드릴다운
   const el=document.getElementById('watchboard');
   const terms=(DATA.meta&&DATA.meta.watch_terms)||[];
   if(!terms.length){ el.innerHTML=''; return; }
@@ -421,15 +425,16 @@ function renderWatch(){   // 배터리/리튬/EV 등 지정 관심 키워드 —
   const hit=terms.filter(t=>wd[t]&&wd[t].length);
   const miss=terms.filter(t=>!hit.includes(t));
   let h=`<div class="lead">🔎 특수 관심 키워드</div>
-    <div class="sub">배터리·소재·전기차 등 지정 키워드가 언급된 그날 뉴스·리포트만 모았습니다.</div>`;
+    <div class="sub">배터리·소재·전기차 등 지정 키워드 — 누르면 전체 피드에서 해당 뉴스만 볼 수 있어요.</div>`;
   if(!hit.length){
     h+=`<div class="empty">오늘은 지정 키워드 언급이 없습니다.</div>`;
   } else {
-    h+=hit.map(t=>`<div class="wsec"><div class="wsec-h">${esc(t)} <span class="wcount">${wd[t].length}건</span></div>
-      ${wd[t].slice(0,6).map(card).join('')}</div>`).join('');
+    h+=`<div class="kchips">${hit.map(t=>
+      `<span class="kchip" data-term="${esc(t)}">${esc(t)} <b>${wd[t].length}</b></span>`).join('')}</div>`;
     if(miss.length) h+=`<div class="wmiss">오늘 언급 없음: ${esc(miss.join(', '))}</div>`;
   }
   el.innerHTML=`<div class="core">${h}</div>`;
+  el.querySelectorAll('[data-term]').forEach(n=>n.onclick=()=>wfilter(n.dataset.term));
 }
 function renderFeed(){
   const feed=(DATA.feeds||{})[CUR]||[];
