@@ -211,23 +211,11 @@ HTML = r"""<!doctype html>
   .kli-pct.up{background:#fdeceb;color:#c0302f;}
   .kli-pct.down{background:#eaf1ff;color:var(--accent);}
 
-  /* 오늘의 핵심 키워드 보드 — 여러 채널이 함께 다룬 반복 이슈(막대=언급건수, 진하기=채널수) */
+  /* 공용 섹션 헤더(핵심 브리핑 하단 특수 키워드 등에서 재사용) */
   .core{margin:0 0 26px;}
   .core .lead{font-size:18px;font-weight:800;color:#111827;margin:0 0 3px;letter-spacing:-.01em;}
   .core .lead .q{font-weight:600;color:var(--muted);font-size:13px;}
   .core .sub{color:var(--muted);font-size:12.5px;line-height:1.55;margin:0 0 15px;}
-  .kbars{display:flex;flex-direction:column;gap:3px;}
-  .kbar-row{display:grid;grid-template-columns:128px 1fr;gap:12px;align-items:center;
-    padding:7px 4px;border-radius:9px;cursor:pointer;transition:background .12s;}
-  .kbar-row:hover{background:var(--accent-soft);}
-  .kbar-lab{font-size:13.5px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;
-    white-space:nowrap;display:flex;align-items:center;gap:5px;}
-  .kbar-lab .g{font-size:11px;opacity:.75;}
-  .kbar-track{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0;}
-  .kbar-fill{height:20px;border-radius:0 4px 4px 0;flex:0 0 auto;}
-  .kbar-val{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;}
-  .kbar-row .kh{color:#8a93a3;font-size:11.5px;grid-column:2;margin-top:-2px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .kmore{color:var(--muted);font-size:12.5px;font-weight:700;margin:16px 0 9px;}
   .kchips{display:flex;flex-wrap:wrap;gap:7px;}
   .kchip{background:var(--chip);color:#374151;border:1px solid var(--line);border-radius:999px;
@@ -236,6 +224,21 @@ HTML = r"""<!doctype html>
   .core .empty{color:var(--muted);font-size:13.5px;background:var(--card);border:1px dashed var(--line);
     border-radius:12px;padding:16px;}
   .core .divider{border:0;border-top:1px solid var(--line);margin:26px 0 4px;}
+
+  /* 키워드맵 — 게이트웨이 첫 화면. 원=키워드(크기 언급건수·진하기 채널수), 선=같은 기사 동시등장 */
+  .nettoggle{color:var(--accent);cursor:pointer;font-weight:700;margin-left:6px;white-space:nowrap;}
+  /* 모바일에서 줄여 맞추면 라벨이 안 읽혀 고정폭+가로스크롤(카드/표와 동일 패턴) */
+  #netgraph{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px;overflow-x:auto;}
+  .netsvg{width:800px;max-width:none;height:auto;display:block;}
+  .netnode{cursor:pointer;}
+  .netnode circle{transition:stroke-width .1s;}
+  .netnode:hover circle,.netnode:focus circle{stroke:var(--accent);stroke-width:3;outline:none;}
+  .netlabel{font-size:11px;font-weight:700;fill:#374151;pointer-events:none;}
+  .nettable{width:100%;border-collapse:collapse;margin-top:4px;font-size:13px;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+  .nettable th,.nettable td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;}
+  .nettable th.num,.nettable td.num{text-align:right;font-variant-numeric:tabular-nums;}
+  .nettable tr:last-child td{border-bottom:0;}
 
   /* 특수 관심 키워드(배터리/리튬/EV 등 지정어) — 페이지 하단, 칩+건수만(.kchip 재사용) */
   .wmiss{color:var(--muted);font-size:12px;margin-top:14px;}
@@ -298,7 +301,8 @@ HTML = r"""<!doctype html>
   <header>
     <h1>📰 마켓 브리핑</h1>
     <div class="tabs">
-      <button class="tab active" data-view="brief">핵심 브리핑</button>
+      <button class="tab active" data-view="net">키워드맵</button>
+      <button class="tab" data-view="brief">핵심 브리핑</button>
       <button class="tab" data-view="feed">전체 피드</button>
     </div>
     <div class="spacer"></div>
@@ -306,7 +310,7 @@ HTML = r"""<!doctype html>
     <button class="tab" id="logout" title="이 기기에서 비밀번호 기억 지우기">로그아웃</button>
   </header>
   <div class="wrap">
-    <div id="coreboard"></div>
+    <div id="netboard"></div>
     <div id="brief" class="md"></div>
     <div id="watchboard"></div>
     <div id="feed" class="hidden">
@@ -335,39 +339,149 @@ async function decrypt(pw){
   const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64(payload.iv)},key,b64(payload.ct));
   return JSON.parse(new TextDecoder().decode(plain));
 }
-let DATA=null, CUR=null, VIEW='brief';
+let DATA=null, CUR=null, VIEW='net';
 
 function dates(){ return Object.keys(DATA.briefings||{}).concat(Object.keys(DATA.feeds||{}))
   .filter((v,i,a)=>a.indexOf(v)===i).sort().reverse(); }
 function label(k){ const m=(k||'').match(/^(\d{4}-\d{2}-\d{2})_(\d{2})$/); return m?`${m[1]} ${m[2]}시`:k; }
 
 const SEQ_RAMP=['#9ec5f4','#6da7ec','#2a78d6','#1c5cab','#104281'];  // 100→700, 채널수 진하기
-function renderCore(){
-  const el=document.getElementById('coreboard');
+
+// 키워드맵 — 같은 기사에 함께 등장한 키워드끼리 선으로 연결(co-occurrence).
+// shared/min(hits) 비가 낮은(우연히 한 번 겹친) 쌍은 걸러내 하이볼 잡음을 줄인다.
+function cooccurEdges(kws, idx){
+  const edges=[];
+  for(let i=0;i<kws.length;i++){
+    const A=idx[kws[i].kw]||[];
+    if(!A.length) continue;
+    const setA=new Set(A);
+    for(let j=i+1;j<kws.length;j++){
+      const B=idx[kws[j].kw]||[];
+      if(!B.length) continue;
+      let shared=0;
+      B.forEach(x=>{ if(setA.has(x)) shared++; });
+      if(!shared) continue;
+      const minH=Math.min(kws[i].hits,kws[j].hits);
+      if(shared>=Math.max(1,Math.ceil(minH*0.34))) edges.push({a:i,b:j,w:shared});
+    }
+  }
+  return edges;
+}
+
+// 간단한 힘-기반(force-directed) 레이아웃 — 반발+스프링+중심인력, 고정 스텝수로 1회 수렴.
+function layoutNetwork(nodes, edges, W, H){
+  const n=nodes.length, cx=W/2, cy=H/2;
+  nodes.forEach((nd,i)=>{
+    const ang=n?i/n*Math.PI*2:0, rad=Math.min(W,H)*0.28;
+    nd.x=cx+Math.cos(ang)*rad; nd.y=cy+Math.sin(ang)*rad; nd.vx=0; nd.vy=0;
+  });
+  for(let step=0;step<360;step++){
+    nodes.forEach(nd=>{ nd.fx=(cx-nd.x)*0.006; nd.fy=(cy-nd.y)*0.006; });
+    for(let i=0;i<n;i++){
+      for(let j=i+1;j<n;j++){
+        const dx=nodes[i].x-nodes[j].x, dy=nodes[i].y-nodes[j].y;
+        const d2=Math.max(dx*dx+dy*dy,25), d=Math.sqrt(d2);
+        const f=9000/d2, ux=dx/d, uy=dy/d;
+        nodes[i].fx+=ux*f; nodes[i].fy+=uy*f;
+        nodes[j].fx-=ux*f; nodes[j].fy-=uy*f;
+      }
+    }
+    edges.forEach(e=>{
+      const A=nodes[e.a], B=nodes[e.b];
+      const dx=B.x-A.x, dy=B.y-A.y, d=Math.max(Math.sqrt(dx*dx+dy*dy),1);
+      const rest=Math.max(64,190-e.w*22), f=(d-rest)*0.02, ux=dx/d, uy=dy/d;
+      A.fx+=ux*f; A.fy+=uy*f; B.fx-=ux*f; B.fy-=uy*f;
+    });
+    nodes.forEach(nd=>{
+      nd.vx=(nd.vx+nd.fx)*0.82; nd.vy=(nd.vy+nd.fy)*0.82;
+      nd.x+=nd.vx; nd.y+=nd.vy;
+    });
+  }
+  // 반경 인지 충돌 보정 — 원(+라벨 여유공간)이 겹치지 않도록 직접 밀어냄.
+  // 힘 시뮬레이션은 점 질량 기준이라 큰 원끼리는 겹칠 수 있어 마무리 패스로 보정.
+  for(let pass=0;pass<120;pass++){
+    let moved=false;
+    for(let i=0;i<n;i++){
+      for(let j=i+1;j<n;j++){
+        const A=nodes[i], B=nodes[j];
+        const dx=B.x-A.x, dy=B.y-A.y;
+        const d=Math.sqrt(dx*dx+dy*dy)||0.01;
+        const minD=(A.r||14)+(B.r||14)+24;
+        if(d<minD){
+          const push=(minD-d)/2, ux=dx/d, uy=dy/d;
+          A.x-=ux*push; A.y-=uy*push;
+          B.x+=ux*push; B.y+=uy*push;
+          moved=true;
+        }
+      }
+    }
+    if(!moved) break;
+  }
+  const pad=52;
+  nodes.forEach(nd=>{
+    const m=pad+(nd.r||14);
+    nd.x=Math.min(W-m,Math.max(m,nd.x)); nd.y=Math.min(H-m,Math.max(m,nd.y));
+  });
+}
+
+let NET_TABLE=false;
+function renderNet(){
+  const el=document.getElementById('netboard');
   const kd=(DATA.keywords||{})[CUR];
   const kws=(kd&&kd.kws)||[];
-  if(!kws.length){ el.innerHTML=''; return; }
-  const rep=kws.filter(k=>k.channels>=2);
-  const single=kws.filter(k=>k.channels<2);
-  const maxHits=Math.max(1,...rep.map(k=>k.hits));
-  const kbar=k=>{
-    const px=Math.max(24,Math.round(k.hits/maxHits*160));
-    const fill=SEQ_RAMP[Math.min(k.channels-2,SEQ_RAMP.length-1)];
-    return `<div class="kbar-row" data-kw="${esc(k.kw)}">
-      <div class="kbar-lab">${k.macro?'<span class="g">🌐</span>':''}${esc(k.kw)}</div>
-      <div class="kbar-track"><div class="kbar-fill" style="width:${px}px;background:${fill}"></div>
-        <span class="kbar-val">${k.channels}개 채널 · ${k.hits}건</span></div>
-      ${k.head?`<div class="kh">${esc(k.head)}</div>`:''}
-    </div>`;
+  if(!kws.length){
+    el.innerHTML=`<div class="core"><div class="lead">🕸️ 키워드맵</div>
+      <div class="empty">이 날짜엔 반복 키워드 데이터가 없습니다 — 핵심 브리핑 탭을 확인하세요.</div><hr class="divider"></div>`;
+    return;
+  }
+  const idx=kd.idx||{};
+  const W=800,H=520;
+  const maxHits=Math.max(1,...kws.map(k=>k.hits));
+  const rNode=k=>Math.round(14+Math.sqrt(k.hits/maxHits)*22);
+  const nodes=kws.map(k=>({kw:k.kw,hits:k.hits,channels:k.channels,macro:k.macro,head:k.head,r:rNode(k)}));
+  const edges=cooccurEdges(kws, idx);
+  layoutNetwork(nodes, edges, W, H);
+  const maxW=Math.max(1,...edges.map(e=>e.w));
+  // 채널수는 날짜마다 범위가 크게 달라(2~14) 고정 임계값이면 진한 쪽에 다 몰림 —
+  // 그날의 최소~최대 범위로 상대 스케일링해 진하기 차이가 실제로 보이게 한다.
+  const chVals=kws.map(k=>k.channels), minCh=Math.min(...chVals), maxCh=Math.max(...chVals);
+  const fillNode=k=>{
+    const t=maxCh>minCh?(k.channels-minCh)/(maxCh-minCh):1;
+    return SEQ_RAMP[Math.min(SEQ_RAMP.length-1,Math.round(t*(SEQ_RAMP.length-1)))];
   };
-  const kchip=k=>`<span class="kchip" data-kw="${esc(k.kw)}">${esc(k.kw)} <b>${k.channels}·${k.hits}</b></span>`;
-  let h=`<div class="lead">🔑 오늘의 핵심 <span class="q">— 여러 채널이 함께 다룬 이슈</span></div>
-    <div class="sub">막대 길이=언급 건수, 진할수록 더 많은 채널이 동시에 다룬 이슈입니다. 개별 소형주 ${(kd.n_noise||0)}건 집계 제외 · 수집 ${(kd.n_items||0)}건. 누르면 전체 피드에서 관련 뉴스만 볼 수 있어요.</div>`;
-  h += rep.length ? `<div class="kbars">${rep.map(kbar).join('')}</div>`
-                  : `<div class="empty">여러 채널이 겹친 반복 이슈가 없습니다 — 아래 주목 키워드를 참고하세요.</div>`;
-  if(single.length) h+=`<div class="kmore">그 외 주목 키워드</div><div class="kchips">${single.map(kchip).join('')}</div>`;
-  el.innerHTML=`<div class="core">${h}<hr class="divider"></div>`;
-  el.querySelectorAll('[data-kw]').forEach(n=>n.onclick=()=>kfilter(n.dataset.kw));
+  const edgeSvg=edges.map(e=>{
+    const A=nodes[e.a], B=nodes[e.b];
+    const sw=(0.6+e.w/maxW*2.2).toFixed(2), op=(0.18+e.w/maxW*0.42).toFixed(2);
+    return `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${B.x.toFixed(1)}" y2="${B.y.toFixed(1)}" stroke="#9aa7bb" stroke-width="${sw}" opacity="${op}"/>`;
+  }).join('');
+  const nodeSvg=nodes.map(nd=>{
+    const r=nd.r, fill=fillNode(nd);
+    return `<g class="netnode" data-kw="${esc(nd.kw)}" tabindex="0">
+      <title>${esc(nd.kw)} · ${nd.hits}건 · ${nd.channels}개 채널${nd.head?(' · '+esc(nd.head)):''}</title>
+      <circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r}" fill="${fill}" stroke="#fff" stroke-width="2"></circle>
+      <text x="${nd.x.toFixed(1)}" y="${(nd.y+r+13).toFixed(1)}" text-anchor="middle" class="netlabel">${nd.macro?'🌐 ':''}${esc(nd.kw)}</text>
+    </g>`;
+  }).join('');
+  const tableRows=kws.map(k=>`<tr><td>${k.macro?'🌐 ':''}${esc(k.kw)}</td><td class="num">${k.hits}</td><td class="num">${k.channels}</td></tr>`).join('');
+  el.innerHTML=`<div class="core">
+    <div class="lead">🕸️ 키워드맵 <span class="q">— 오늘 반복된 이슈들의 연결</span></div>
+    <div class="sub">원 크기=언급 건수, 진할수록 더 많은 채널이 함께 다뤘습니다. 선은 같은 기사에 함께 등장한 키워드끼리 이어집니다.
+      개별 소형주 ${(kd.n_noise||0)}건 집계 제외 · 수집 ${(kd.n_items||0)}건. 원을 누르면 관련 뉴스만 볼 수 있어요.
+      <span class="nettoggle" id="netToggle">표로 보기</span></div>
+    <div id="netgraph"><svg viewBox="0 0 ${W} ${H}" class="netsvg" role="img" aria-label="키워드 연결망">${edgeSvg}${nodeSvg}</svg></div>
+    <table class="nettable hidden" id="netTable"><thead><tr><th>키워드</th><th class="num">건수</th><th class="num">채널</th></tr></thead><tbody>${tableRows}</tbody></table>
+    <hr class="divider"></div>`;
+  el.querySelectorAll('.netnode').forEach(n=>{
+    n.onclick=()=>kfilter(n.dataset.kw);
+    n.onkeydown=e=>{ if(e.key==='Enter') kfilter(n.dataset.kw); };
+  });
+  const tg=document.getElementById('netToggle');
+  tg.onclick=()=>{
+    NET_TABLE=!NET_TABLE;
+    document.getElementById('netgraph').classList.toggle('hidden',NET_TABLE);
+    document.getElementById('netTable').classList.toggle('hidden',!NET_TABLE);
+    tg.textContent=NET_TABLE?'그래프로 보기':'표로 보기';
+  };
 }
 let KFILTER_IDX=null, KFILTER_LABEL=null;   // 키워드/관심어 클릭 드릴다운 — 정확한 인덱스로만 필터
 function applyFilter(idxArr, label){
@@ -410,7 +524,6 @@ function enhanceBrief(){   // 핵심 3줄/오늘 꼭 볼 것 불릿 → 수치 �
   });
 }
 function renderBrief(){
-  renderCore();
   const md=(DATA.briefings||{})[CUR], brief=document.getElementById('brief');
   if(md && md.indexOf('자동 추출 요약')<0){ brief.innerHTML=marked.parse(md); enhanceBrief(); }  // AI 종합 브리핑
   else if(!md) brief.innerHTML='<p class="meta" style="margin-top:8px">이 날짜의 AI 종합 브리핑은 없습니다. 위 핵심 키워드를 참고하세요.</p>';
@@ -477,11 +590,11 @@ function card(r){
   return `<div class="card"><div class="top"><span class="chip">${esc(r.ch)}</span><span class="time">${t}${ssb}</span></div>
     <div class="head">${esc(r.head)}</div>${sum}${arts}<div class="links">${links.join('')}</div></div>`;
 }
-function render(){ VIEW==='brief'?renderBrief():renderFeed(); }
+function render(){ if(VIEW==='net') renderNet(); else if(VIEW==='brief') renderBrief(); else renderFeed(); }
 
 function setView(v){ VIEW=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===v));
-  document.getElementById('coreboard').classList.toggle('hidden',v!=='brief');
+  document.getElementById('netboard').classList.toggle('hidden',v!=='net');
   document.getElementById('brief').classList.toggle('hidden',v!=='brief');
   document.getElementById('watchboard').classList.toggle('hidden',v!=='brief');
   document.getElementById('feed').classList.toggle('hidden',v!=='feed');
@@ -501,7 +614,7 @@ async function unlock(){
   document.getElementById('q').oninput=renderFeed;
   document.getElementById('ssToggle').onchange=renderFeed;
   document.getElementById('logout').onclick=()=>{localStorage.removeItem('mb_pw');location.reload();};
-  setView('brief');
+  setView('net');
 }
 document.getElementById('go').onclick=unlock;
 document.getElementById('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock();});
